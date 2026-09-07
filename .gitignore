@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+storage/db/*.db*
+storage/app.lock
+*.db
+storage/private/**
+storage/public/**
+storage/tmp/**
+!storage/private/.gitkeep
+!storage/public/.gitkeep
+!storage/tmp/.gitkeep
+coverage/
+.DS_Store
