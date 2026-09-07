@@ -10,7 +10,7 @@ import { currentUser, requireUser } from '../../infrastructure/sessions.js';
 import { prisma as db, writeCoordinator } from '../../infrastructure/prisma.js';
 import { publicOrderNumber, sha256 } from '../../shared/ids.js';
 import { moneyDto } from '../../shared/money.js';
-import { saveImage } from '../media/media.js';
+import { saveImage } from '../media/index.js';
 import { logger } from '../../infrastructure/logger.js';
 
 const itemSchema = z.object({ productId: z.string().uuid(), quantity: z.number().int().min(1).max(100), productVersion: z.number().int().min(1) });

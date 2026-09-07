@@ -6,7 +6,7 @@ import { env } from '../../config/env.js';
 import { AppError, badRequest, conflict, unauthorized } from '../../shared/errors.js';
 import { normalizeEmail, randomToken, sha256 } from '../../shared/ids.js';
 import { hashPassword, verifyPassword, encrypt, decrypt, verifyTotp, createTotp } from '../../shared/crypto.js';
-import { ADMIN_CSRF_COOKIE, createAdminSession, createUserSession, currentAdmin, currentUser, requireAdmin, requireUser, revokeAdminSession, revokeUserSession, USER_CSRF_COOKIE } from '../../infrastructure/sessions.js';
+import { createAdminSession, createUserSession, currentAdmin, currentUser, requireAdmin, requireUser, revokeAdminSession, revokeUserSession, rotateCsrfToken } from '../../infrastructure/sessions.js';
 import { email } from '../../infrastructure/email.js';
 import { logger } from '../../infrastructure/logger.js';
 import { prisma as db } from '../../infrastructure/prisma.js';
@@ -57,11 +57,11 @@ function toPublicUser(user: { id: string; email: string; name: string | null; em
 export function createAuthRouter(prisma: PrismaClient): Router {
   const router = Router();
 
-  router.get('/csrf', (req, res) => {
+  router.get('/csrf', async (req, res) => {
     const user = currentUser(req);
     const admin = currentAdmin(req);
     if (!user && !admin) return res.status(200).json({ csrfToken: null });
-    return res.status(200).json({ csrfToken: req.cookies?.[user ? USER_CSRF_COOKIE : ADMIN_CSRF_COOKIE] ?? null });
+    return res.status(200).json({ csrfToken: await rotateCsrfToken(req, res) });
   });
 
   router.post('/register', rateLimit(5, 15 * 60 * 1000), async (req, res) => {

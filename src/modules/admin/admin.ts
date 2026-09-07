@@ -5,8 +5,8 @@ import { currentAdmin, requireAdmin } from '../../infrastructure/sessions.js';
 import { writeCoordinator } from '../../infrastructure/prisma.js';
 import { conflict, badRequest, notFound } from '../../shared/errors.js';
 import { parseMinor } from '../../shared/money.js';
-import { saveImage } from '../media/media.js';
-import { releaseReservations } from '../orders/orders.js';
+import { saveImage } from '../media/index.js';
+import { releaseReservations } from '../orders/index.js';
 
 const productSchema = z.object({
   sku: z.string().trim().min(1).max(80), slug: z.string().regex(/^[a-z0-9-]+$/).max(120), name: z.string().trim().min(1).max(180), description: z.string().max(5000), kind: z.enum(['SINGLE_CARD', 'SEALED_PRODUCT']), stockMode: z.enum(['UNIQUE', 'QUANTITY']), priceMinor: z.string().regex(/^\d+$/), stock: z.number().int().min(0).max(1_000_000), pokemonCard: z.object({ setName: z.string().min(1).max(120), setCode: z.string().max(40).optional(), cardNumber: z.string().min(1).max(30), rarity: z.string().min(1).max(80), language: z.string().min(1).max(40), condition: z.enum(['NM', 'EXCELLENT', 'GOOD', 'PLAYED', 'DAMAGED']), finish: z.string().max(50).optional(), edition: z.string().max(80).optional(), gradingCompany: z.string().max(80).optional(), grade: z.string().max(30).optional(), certificationNumber: z.string().max(100).optional() }).optional(), });

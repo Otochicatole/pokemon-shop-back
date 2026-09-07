@@ -17,6 +17,12 @@ pnpm dev
 
 Swagger queda disponible en `http://localhost:3000/docs` y el documento OpenAPI en `/openapi.json`.
 
+## Arquitectura
+
+El backend usa screaming architecture por capacidad de negocio. Los módulos públicos están en `src/modules` y separan `domain`, `application`, `infrastructure` y `http`; la composición manual de Prisma, sesiones, pagos, correo y almacenamiento se realiza en `src/app/composition-root.ts`. Los casos de uso no dependen de Express ni de Prisma directamente.
+
+La API actual para el frontend es `/api/v2`. Las respuestas exitosas usan `{ data, meta }` y los errores usan Problem Details (`code`, `status`, `title`, `detail`, `requestId`). El contrato `/api/v1` fue retirado al completar la migración.
+
 ## Seguridad y operación
 
 - Los importes y el stock siempre se recalculan en backend.

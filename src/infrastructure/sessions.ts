@@ -111,6 +111,25 @@ const resLocals = (request: Request): Locals => (request as Request & { authLoca
 export function currentUser(request: Request) { return resLocals(request).userSession; }
 export function currentAdmin(request: Request) { return resLocals(request).adminSession; }
 
+/** Rotates the double-submit CSRF token for the active session. */
+export async function rotateCsrfToken(request: Request, response: Response): Promise<string | null> {
+  const userSession = currentUser(request);
+  if (userSession) {
+    const token = randomToken(32);
+    await prisma.userSession.update({ where: { id: userSession.id }, data: { csrfHash: sha256(token) } });
+    response.cookie(USER_CSRF_COOKIE, token, cookieOptions(false));
+    return token;
+  }
+  const adminSession = currentAdmin(request);
+  if (adminSession) {
+    const token = randomToken(32);
+    await prisma.adminSession.update({ where: { id: adminSession.id }, data: { csrfHash: sha256(token) } });
+    response.cookie(ADMIN_CSRF_COOKIE, token, cookieOptions(false));
+    return token;
+  }
+  return null;
+}
+
 export async function csrfProtection(request: Request, _response: Response, next: NextFunction) {
   if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return next();
   const session = currentUser(request) ?? currentAdmin(request);

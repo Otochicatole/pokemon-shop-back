@@ -5,7 +5,7 @@ import { env } from './config/env.js';
 import { configureSqlite, prisma, writeCoordinator } from './infrastructure/prisma.js';
 import { ensureStorage } from './modules/media/media.js';
 import { logger } from './infrastructure/logger.js';
-import { releaseReservations } from './modules/orders/orders.js';
+import { ExpireReservations } from './modules/inventory/index.js';
 
 const lockPath = path.resolve(env.STORAGE_ROOT, 'app.lock');
 
@@ -51,16 +51,7 @@ async function acquireLock() {
 }
 
 async function expireOrders() {
-  const orders = await prisma.order.findMany({ where: { expiresAt: { lt: new Date() }, status: { in: ['PENDING_PAYMENT', 'PAYMENT_REVIEW'] } }, select: { id: true } });
-  for (const order of orders) {
-    await writeCoordinator.run(() => prisma.$transaction(async (tx) => {
-      const current = await tx.order.findUnique({ where: { id: order.id } });
-      if (!current || !['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(current.status) || !current.expiresAt || current.expiresAt > new Date()) return;
-      await tx.order.update({ where: { id: current.id }, data: { status: 'EXPIRED' } });
-      await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'EXPIRED', note: 'Payment window expired' } });
-      await releaseReservations(tx, current.id);
-    }));
-  }
+  await new ExpireReservations({ prisma, writeCoordinator }).execute();
 }
 
 async function main() {

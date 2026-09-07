@@ -1,0 +1,32 @@
+import type { PrismaClient, Prisma } from '@prisma/client';
+import { OrderStatus } from '@prisma/client';
+
+export interface ReservationExpiryDependencies {
+  prisma: PrismaClient;
+  writeCoordinator: { run<T>(work: () => Promise<T>): Promise<T> };
+}
+
+export class ExpireReservations {
+  public constructor(private readonly dependencies: ReservationExpiryDependencies) {}
+
+  public async execute(now = new Date()): Promise<void> {
+    const orders = await this.dependencies.prisma.order.findMany({ where: { expiresAt: { lt: now }, status: { in: [OrderStatus.PENDING_PAYMENT, OrderStatus.PAYMENT_REVIEW] } }, select: { id: true } });
+    for (const order of orders) {
+      await this.dependencies.writeCoordinator.run(() => this.dependencies.prisma.$transaction(async (tx) => {
+        const current = await tx.order.findUnique({ where: { id: order.id } });
+        if (!current || (current.status !== OrderStatus.PENDING_PAYMENT && current.status !== OrderStatus.PAYMENT_REVIEW) || !current.expiresAt || current.expiresAt > now) return;
+        await tx.order.update({ where: { id: current.id }, data: { status: OrderStatus.EXPIRED } });
+        await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: OrderStatus.EXPIRED, note: 'Payment window expired' } });
+        await releaseReservations(tx, current.id, now);
+      }));
+    }
+  }
+}
+
+async function releaseReservations(tx: Prisma.TransactionClient, orderId: string, now: Date) {
+  const reservations = await tx.inventoryReservation.findMany({ where: { orderId, releasedAt: null, consumedAt: null } });
+  for (const reservation of reservations) {
+    await tx.inventory.update({ where: { productId: reservation.productId }, data: { reserved: { decrement: reservation.quantity }, version: { increment: 1 } } });
+    await tx.inventoryReservation.update({ where: { id: reservation.id }, data: { releasedAt: now } });
+  }
+}
