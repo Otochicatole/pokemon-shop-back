@@ -10,6 +10,15 @@ describe('v2 public contract', () => {
     expect(response.body.meta).toHaveProperty('nextCursor');
   });
 
+  it('documents catalog query filters, facets and product detail', async () => {
+    const response = await request(app).get('/openapi.json');
+    expect(response.status).toBe(200);
+    expect(response.body.paths).toHaveProperty('/api/v2/catalog/filters');
+    expect(response.body.paths).toHaveProperty('/api/v2/catalog/products/{slug}');
+    const parameters = response.body.paths['/api/v2/catalog/products'].get.parameters as Array<{ name: string }>;
+    expect(parameters.map((parameter) => parameter.name)).toEqual(expect.arrayContaining(['kind', 'pokemonType', 'inStock', 'minPriceMinor', 'sort']));
+  });
+
   it('returns problem details for unknown v2 routes', async () => {
     const response = await request(app).get('/api/v2/does-not-exist');
     expect(response.status).toBe(404);

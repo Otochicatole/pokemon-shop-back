@@ -11,7 +11,6 @@ import { AppError } from './shared/errors.js';
 import { ADMIN_COOKIE, csrfProtection, getAdminSession, getUserSession, USER_COOKIE } from './infrastructure/sessions.js';
 import { rateLimit } from './infrastructure/rate-limit.js';
 import { createCompositionRoot } from './app/composition-root.js';
-import { createCatalogV2Router, PrismaCatalogRepository } from './modules/catalog/index.js';
 import { responseEnvelopeV2 } from './app/http/middleware/response-envelope.js';
 
 export function createApp(): Express {
@@ -49,13 +48,12 @@ export function createApp(): Express {
   const mount = (prefix: string) => {
     app.use(`${prefix}/auth`, composition.routers.customerAccess);
     app.use(`${prefix}/admin/auth`, composition.routers.adminAccess);
-    app.use(`${prefix}/catalog`, composition.routers.catalog);
     app.use(prefix, composition.routers.commerce);
     app.use(`${prefix}/admin`, composition.routers.backoffice);
   };
   // v2 exposes the business capabilities through explicit module boundaries.
   app.use('/api/v2', responseEnvelopeV2());
-  app.use('/api/v2/catalog', createCatalogV2Router(new PrismaCatalogRepository(prisma)));
+  app.use('/api/v2/catalog', composition.routers.catalog);
   mount('/api/v2');
   app.use('/media', composition.routers.media);
   app.use(composition.routers.docs);

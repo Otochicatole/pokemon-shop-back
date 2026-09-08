@@ -2,7 +2,7 @@ import type { Express } from 'express';
 import multer from 'multer';
 import { prisma, writeCoordinator } from '../infrastructure/prisma.js';
 import { createAuthRouter, createAdminAuthRouter } from '../modules/auth/index.js';
-import { createCatalogRouter } from '../modules/catalog/index.js';
+import { createCatalogV2Router, PrismaCatalogRepository } from '../modules/catalog/index.js';
 import { createOrdersRouter } from '../modules/orders/index.js';
 import { createAdminRouter } from '../modules/admin/index.js';
 import { createMediaRouter } from '../modules/media/index.js';
@@ -17,7 +17,7 @@ export interface CompositionRoot {
   routers: {
     customerAccess: ReturnType<typeof createAuthRouter>;
     adminAccess: ReturnType<typeof createAdminAuthRouter>;
-    catalog: ReturnType<typeof createCatalogRouter>;
+    catalog: ReturnType<typeof createCatalogV2Router>;
     commerce: ReturnType<typeof createOrdersRouter>;
     backoffice: ReturnType<typeof createAdminRouter>;
     media: ReturnType<typeof createMediaRouter>;
@@ -39,7 +39,7 @@ export function createCompositionRoot(): CompositionRoot {
     routers: {
       customerAccess: createAuthRouter(prisma),
       adminAccess: createAdminAuthRouter(prisma),
-      catalog: createCatalogRouter(prisma),
+      catalog: createCatalogV2Router(new PrismaCatalogRepository(prisma)),
       commerce: createOrdersRouter(prisma, upload),
       backoffice: createAdminRouter(prisma, upload),
       media: createMediaRouter(prisma),

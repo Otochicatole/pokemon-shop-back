@@ -23,6 +23,8 @@ El backend usa screaming architecture por capacidad de negocio. Los módulos pú
 
 La API actual para el frontend es `/api/v2`. Las respuestas exitosas usan `{ data, meta }` y los errores usan Problem Details (`code`, `status`, `title`, `detail`, `requestId`). El contrato `/api/v1` fue retirado al completar la migración.
 
+El catálogo público expone `/api/v2/catalog/products` y `/api/v2/catalog/filters`. Los parámetros `kind`, `pokemonType`, `setName`, `rarity`, `condition`, `language`, `finish`, `edition` y `gradingCompany` son repetibles; las selecciones dentro de una faceta se combinan con OR y las distintas facetas con AND. También admite `q`, `setCode`, `graded`, `inStock`, `minPriceMinor`, `maxPriceMinor`, `sort`, `cursor` y `limit`. Swagger contiene el contrato completo y los valores válidos.
+
 ## Seguridad y operación
 
 - Los importes y el stock siempre se recalculan en backend.
@@ -35,7 +37,7 @@ El proyecto está diseñado para una sola instancia mientras use SQLite y almace
 
 ## Datos de desarrollo
 
-`pnpm db:seed` es idempotente y crea ocho productos publicados con imágenes locales, inventario, retiro, envíos y los accesos de prueba:
+`pnpm db:seed` es idempotente y crea diecisiete productos publicados con imágenes locales, los once tipos TCG, accesorios, metadatos de colección, inventario, retiro, envíos y los accesos de prueba:
 
 - Usuario: `user@cardshop.test` / `User123!seed-card-shop`
 - Admin: `admin@cardshop.test` / `Admin123!seed-card-shop`
