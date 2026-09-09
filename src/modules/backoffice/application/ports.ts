@@ -4,10 +4,11 @@ import type {
   OrderDto, OrderStatusMutationDto, PickupPointResultDto, ProductDetailDto, ProductDto,
   ProductImageOrderDto, ProductImagesDto, ProductImageUpdateDto, ProductStatusDto, RefundDto,
   ShippingZoneResultDto, TransferReviewDto,
+  SupplierActiveMutationDto, SupplierDetailDto, SupplierDto,
 } from './dtos.js';
 import type {
   AdminActor, AuditListQuery, CustomerListQuery, OrderListQuery, OrderStatusValue,
-  ProductListQuery, ProductPatch, ProductWrite,
+  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierWrite,
 } from '../domain/admin-cms.js';
 
 export interface DashboardReader {
@@ -66,6 +67,14 @@ export interface AuditAdminRepository {
   listAudit(query: AuditListQuery): Promise<CursorPageDto<AuditEntryDto>>;
 }
 
+export interface SupplierAdminRepository {
+  listSuppliers(query: SupplierListQuery): Promise<CursorPageDto<SupplierDto>>;
+  getSupplier(id: string): Promise<SupplierDetailDto>;
+  createSupplier(actor: AdminActor, input: SupplierWrite): Promise<SupplierDetailDto>;
+  updateSupplier(actor: AdminActor, id: string, input: SupplierPatch): Promise<SupplierDetailDto>;
+  setSupplierActive(actor: AdminActor, id: string, active: boolean, expectedVersion: number): Promise<SupplierActiveMutationDto>;
+}
+
 export type AdminCmsRepositories = {
   dashboard: DashboardReader;
   products: ProductAdminRepository;
@@ -75,6 +84,7 @@ export type AdminCmsRepositories = {
   fulfillment: FulfillmentAdminRepository;
   customers: CustomerAdminRepository;
   audit: AuditAdminRepository;
+  suppliers: SupplierAdminRepository;
 };
 
 export type ShippingZoneWrite = {

@@ -8,7 +8,8 @@ import {
   expectedVersionSchema, idParamsSchema, imageOrderSchema, imagePatchSchema, imageUploadFieldsSchema, inventoryAdjustmentSchema,
   orderActionSchema, orderListQuerySchema, orderParamsSchema, orderTransitionSchema, paymentsQuerySchema,
   pickupPointWriteSchema, productImageParamsSchema, productListQuerySchema, productPatchSchema,
-  productWriteSchema, refundSchema, shippingZoneWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
+  productWriteSchema, refundSchema, shippingZoneWriteSchema, supplierActiveSchema, supplierListQuerySchema,
+  supplierPatchSchema, supplierWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
 } from './admin-cms-schemas.js';
 
 const noContent = (response: import('express').Response) => response.status(204).send();
@@ -82,6 +83,15 @@ export function createAdminCmsRouter({ application, upload, requireAdmin, actorF
     return res.json(await application.inventory.adjust(actorFromRequest(req), idParamsSchema.parse(req.params).id, input.delta, input.reason));
   });
   router.get('/inventory', async (req, res) => res.json(await application.inventory.list(productListQuerySchema.parse(req.query))));
+
+  router.get('/suppliers', async (req, res) => res.json(await application.suppliers.list(supplierListQuerySchema.parse(req.query))));
+  router.get('/suppliers/:id', async (req, res) => res.json(await application.suppliers.get(idParamsSchema.parse(req.params).id)));
+  router.post('/suppliers', async (req, res) => res.status(201).json(await application.suppliers.create(actorFromRequest(req), supplierWriteSchema.parse(req.body))));
+  router.patch('/suppliers/:id', async (req, res) => res.json(await application.suppliers.update(actorFromRequest(req), idParamsSchema.parse(req.params).id, supplierPatchSchema.parse(req.body))));
+  router.patch('/suppliers/:id/active', async (req, res) => {
+    const input = supplierActiveSchema.parse(req.body);
+    return res.json(await application.suppliers.setActive(actorFromRequest(req), idParamsSchema.parse(req.params).id, input.active, input.expectedVersion));
+  });
 
   router.get('/orders', async (req, res) => res.json(await application.orders.list(orderListQuerySchema.parse(req.query))));
   router.get('/orders/:number', async (req, res) => res.json(await application.orders.get(orderParamsSchema.parse(req.params).number)));

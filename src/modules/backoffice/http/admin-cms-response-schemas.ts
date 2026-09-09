@@ -129,6 +129,14 @@ export const adminShippingZoneResultDataSchema = z.object({ shippingZone: adminS
 export const adminPickupPointResultDataSchema = z.object({ pickupPoint: adminPickupPointSchema });
 export const adminActiveMutationDataSchema = z.object({ id: z.string().uuid(), active: z.boolean() });
 
+export const adminSupplierSchema = z.object({
+  id: z.string().uuid(), name: z.string(), contactName: z.string().nullable(), email: z.string().email().nullable(),
+  phone: z.string().nullable(), address: z.string().nullable(), notes: z.string().nullable(), active: z.boolean(),
+  version: z.number().int(), createdAt: dateTime, updatedAt: dateTime,
+});
+export const adminSupplierDetailDataSchema = z.object({ supplier: adminSupplierSchema });
+export const adminSupplierActiveMutationDataSchema = z.object({ id: z.string().uuid(), active: z.boolean(), version: z.number().int() });
+
 export const adminCustomerSummarySchema = adminOrderCustomerSchema.extend({ ordersCount: z.number().int(), paidTotal: adminMoneySchema });
 export const adminCustomerDetailDataSchema = z.object({
   customer: adminOrderCustomerSchema.extend({

@@ -5,13 +5,15 @@ import {
   expectedVersionSchema, idParamsSchema, imageOrderSchema, imagePatchSchema, imageUploadFieldsSchema, inventoryAdjustmentSchema,
   orderActionSchema, orderListQuerySchema, orderParamsSchema, orderTransitionSchema, paymentsQuerySchema,
   pickupPointWriteSchema, productImageParamsSchema, productListQuerySchema, productPatchSchema,
-  productWriteSchema, refundSchema, shippingZoneWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
+  productWriteSchema, refundSchema, shippingZoneWriteSchema, supplierActiveSchema, supplierListQuerySchema,
+  supplierPatchSchema, supplierWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
   adminActiveMutationDataSchema, adminAuditEntrySchema, adminCustomerDetailDataSchema, adminCustomerSummarySchema,
   adminDashboardDataSchema, adminEnvelopeSchema, adminFulfillmentDataSchema, adminFullRefundDataSchema,
   adminInventoryAdjustmentSchema, adminInventoryMutationDataSchema, adminOrderDetailDataSchema, adminOrderSchema,
   adminOrderStatusDataSchema, adminPickupPointResultDataSchema, adminProductDetailDataSchema, adminProductImageOrderDataSchema,
   adminProductImagesDataSchema, adminProductImageUpdateDataSchema, adminProductSchema, adminProductStatusDataSchema,
   adminShippingZoneResultDataSchema, adminTransferReviewDataSchema,
+  adminSupplierActiveMutationDataSchema, adminSupplierDetailDataSchema, adminSupplierSchema,
 } from '../backoffice/index.js';
 
 type Options = { problemSchema: z.ZodType; moneySchema: z.ZodType };
@@ -37,6 +39,8 @@ export function registerAdminCmsPaths(registry: OpenAPIRegistry, { problemSchema
   registry.register('AdminOrderTransition', orderTransitionSchema);
   registry.register('AdminShippingZoneWrite', shippingZoneWriteSchema);
   registry.register('AdminPickupPointWrite', pickupPointWriteSchema);
+  registry.register('AdminSupplierWrite', supplierWriteSchema);
+  registry.register('AdminSupplierPatch', supplierPatchSchema);
 
   registry.registerPath({ method: 'get', path: '/api/v2/admin/dashboard', tags: ['Admin dashboard'], summary: 'Read operational and commercial metrics', security, request: { query: dashboardQuerySchema }, responses: ok('Dashboard for the selected date range', adminDashboardDataSchema) });
 
@@ -59,6 +63,12 @@ export function registerAdminCmsPaths(registry: OpenAPIRegistry, { problemSchema
   registry.registerPath({ method: 'get', path: '/api/v2/admin/inventory', tags: ['Admin inventory'], summary: 'List on-hand, reserved and available inventory', security, request: { query: productListQuerySchema }, responses: ok('Cursor page of inventory', z.array(adminProductSchema)) });
   registry.registerPath({ method: 'get', path: '/api/v2/admin/products/{id}/inventory-adjustments', tags: ['Admin inventory'], summary: 'List immutable stock adjustments', security, request: { params: idParamsSchema, query: cursorQuerySchema }, responses: ok('Cursor page of stock adjustments', z.array(adminInventoryAdjustmentSchema)) });
   registry.registerPath({ method: 'post', path: '/api/v2/admin/products/{id}/inventory-adjustment', tags: ['Admin inventory'], summary: 'Apply a reasoned stock delta without changing reservations', security, request: { params: idParamsSchema, headers: csrf, body: json(inventoryAdjustmentSchema) }, responses: ok('Inventory adjusted', adminInventoryMutationDataSchema) });
+
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/suppliers', tags: ['Admin suppliers'], summary: 'List supplier directory entries', security, request: { query: supplierListQuerySchema }, responses: ok('Cursor page of suppliers', z.array(adminSupplierSchema)) });
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/suppliers/{id}', tags: ['Admin suppliers'], summary: 'Read supplier details', security, request: { params: idParamsSchema }, responses: ok('Supplier detail', adminSupplierDetailDataSchema) });
+  registry.registerPath({ method: 'post', path: '/api/v2/admin/suppliers', tags: ['Admin suppliers'], summary: 'Create an active supplier', security, request: { headers: csrf, body: json(supplierWriteSchema) }, responses: created('Supplier created', adminSupplierDetailDataSchema) });
+  registry.registerPath({ method: 'patch', path: '/api/v2/admin/suppliers/{id}', tags: ['Admin suppliers'], summary: 'Edit a supplier using optimistic concurrency', security, request: { params: idParamsSchema, headers: csrf, body: json(supplierPatchSchema) }, responses: ok('Supplier updated', adminSupplierDetailDataSchema) });
+  registry.registerPath({ method: 'patch', path: '/api/v2/admin/suppliers/{id}/active', tags: ['Admin suppliers'], summary: 'Activate or deactivate a supplier without deleting history', security, request: { params: idParamsSchema, headers: csrf, body: json(supplierActiveSchema) }, responses: ok('Supplier availability changed', adminSupplierActiveMutationDataSchema) });
 
   registry.registerPath({ method: 'get', path: '/api/v2/admin/orders', tags: ['Admin orders'], summary: 'List and filter orders', security, request: { query: orderListQuerySchema }, responses: ok('Cursor page of orders', z.array(adminOrderSchema)) });
   registry.registerPath({ method: 'get', path: '/api/v2/admin/orders/{number}', tags: ['Admin orders'], summary: 'Read immutable snapshots, timeline and allowed actions', security, request: { params: orderParamsSchema }, responses: ok('Administrative order detail', adminOrderDetailDataSchema) });

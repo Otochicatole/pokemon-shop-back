@@ -95,6 +95,12 @@ const products: SeedProduct[] = [
   { id: '99999999-9999-4999-8999-999999999998', sku: 'ACCESSORY-003', slug: 'aurora-playmat', name: 'Aurora Playmat', description: 'Playmat de neoprene con superficie suave y base antideslizante.', kind: 'ACCESSORY', stockMode: 'QUANTITY', priceMinor: 92000n, stock: 22, pokemonCard: null },
 ];
 
+const suppliers = [
+  { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1', name: 'Mazo Norte Distribuciones', contactName: 'Lucía Fernández', email: 'lucia@mazonorte.test', phone: '+54 11 4555 0101', address: 'Av. Corrientes 2450, CABA', notes: 'Entrega quincenal. Coordinar recepción con 48 h de anticipación.', active: true },
+  { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', name: 'Coleccionables del Sur', contactName: 'Martín Acosta', email: 'ventas@coleccionablesdelsur.test', phone: '+54 11 4777 2233', address: 'Calle 12 840, La Plata', notes: 'Especialistas en accesorios y productos sellados.', active: true },
+  { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3', name: 'Importadora Prisma', contactName: 'Sofía Ruiz', email: 'sofia@importadoraprisma.test', phone: '+54 351 455 8899', address: 'Bv. San Juan 980, Córdoba', notes: 'Proveedor histórico actualmente inactivo.', active: false },
+] as const;
+
 const cmsOrderFixtures = [
   {
     number: 'CS-DEMO-1001', status: 'PAYMENT_REVIEW', paymentMethod: 'BANK_TRANSFER', paymentStatus: 'UNDER_REVIEW', fulfillmentType: 'SHIPMENT', ageHours: 2,
@@ -418,9 +424,12 @@ async function main() {
   const standardShippingRate = await prisma.shippingRate.upsert({ where: { id: 'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1' }, update: { zoneId: zone.id, name: 'Envío estándar', priceMinor: 65000n, currency: 'ARS', active: true }, create: { id: 'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1', zoneId: zone.id, name: 'Envío estándar', priceMinor: 65000n, currency: 'ARS', active: true } });
   await prisma.shippingRate.upsert({ where: { id: 'aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2' }, update: { zoneId: zone.id, name: 'Envío express', priceMinor: 120000n, currency: 'ARS', active: true }, create: { id: 'aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2', zoneId: zone.id, name: 'Envío express', priceMinor: 120000n, currency: 'ARS', active: true } });
   const pickupPoint = await prisma.pickupPoint.upsert({ where: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }, update: { name: 'Card Shop · Palermo', address: 'Av. Santa Fe 1234, CABA', active: true }, create: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Card Shop · Palermo', address: 'Av. Santa Fe 1234, CABA', active: true } });
+  for (const supplier of suppliers) {
+    await prisma.supplier.upsert({ where: { id: supplier.id }, update: supplier, create: supplier });
+  }
   const receiptFileId = await seedPrivateTransferReceipt();
   await seedCmsOrders({ adminId: admin.id, userId: user.id, zone, shippingRate: standardShippingRate, pickupPoint, receiptFileId, now: new Date() });
-  console.log(JSON.stringify({ seed: 'ok', admin: { email: adminEmail, password: adminPassword }, user: { email: userEmail, password: userPassword }, products: products.length, orders: cmsOrderFixtures.length, pendingTransferReceiptFileId: receiptFileId, pickupPointId: pickupPoint.id, shippingRateIds: ['aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1', 'aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2'] }, null, 2));
+  console.log(JSON.stringify({ seed: 'ok', admin: { email: adminEmail, password: adminPassword }, user: { email: userEmail, password: userPassword }, products: products.length, suppliers: suppliers.length, orders: cmsOrderFixtures.length, pendingTransferReceiptFileId: receiptFileId, pickupPointId: pickupPoint.id, shippingRateIds: ['aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1', 'aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2'] }, null, 2));
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(async () => { await prisma.$disconnect(); });

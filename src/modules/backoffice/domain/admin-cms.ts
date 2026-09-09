@@ -48,6 +48,17 @@ export type ProductWrite = {
 
 export type ProductPatch = Partial<ProductWrite> & { expectedVersion: number };
 
+export type SupplierWrite = {
+  name: string;
+  contactName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  notes?: string | null;
+};
+
+export type SupplierPatch = Partial<SupplierWrite> & { expectedVersion: number };
+
 export type ProductListQuery = CursorPage & {
   search?: string;
   status?: ProductStatusValue;
@@ -69,6 +80,7 @@ export type OrderListQuery = CursorPage & {
 
 export type CustomerListQuery = CursorPage & { search?: string; status?: 'ACTIVE' | 'SUSPENDED'; verified?: boolean };
 export type AuditListQuery = CursorPage & { actorId?: string; action?: string; entityType?: string; requestId?: string; from?: Date; to?: Date };
+export type SupplierListQuery = CursorPage & { search?: string; active?: boolean };
 
 export const allowedOrderTransitions: Readonly<Record<OrderStatusValue, readonly OrderStatusValue[]>> = {
   PENDING_PAYMENT: [], PAYMENT_REVIEW: [],

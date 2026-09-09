@@ -178,6 +178,22 @@ export type ShippingZoneResultDto = { shippingZone: ShippingZoneDto };
 export type PickupPointResultDto = { pickupPoint: PickupPointDto };
 export type ActiveMutationDto = { id: string; active: boolean };
 
+export type SupplierDto = {
+  id: string;
+  name: string;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  notes: string | null;
+  active: boolean;
+  version: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+export type SupplierDetailDto = { supplier: SupplierDto };
+export type SupplierActiveMutationDto = { id: string; active: boolean; version: number };
+
 export type CustomerSummaryDto = OrderCustomerDto & { ordersCount: number; paidTotal: MoneyDto };
 export type CustomerDetailDto = {
   customer: OrderCustomerDto & { updatedAt: Date; ordersCount: number; paidTotal: MoneyDto; orders: OrderDto[] };

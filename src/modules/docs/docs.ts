@@ -110,6 +110,7 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
       { name: 'Admin dashboard' },
       { name: 'Admin products' },
       { name: 'Admin inventory' },
+      { name: 'Admin suppliers', description: 'Supplier directory and lifecycle management.' },
       { name: 'Admin orders' },
       { name: 'Admin payments' },
       { name: 'Admin fulfillment' },

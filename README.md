@@ -23,7 +23,7 @@ Con el frontend ejecutándose en el puerto 3001, el CMS se abre en `http://local
 
 El backend usa screaming architecture por capacidad de negocio. Los módulos públicos están en `src/modules` y separan `domain`, `application`, `infrastructure` y `http`; la composición manual de Prisma, sesiones, pagos, correo y almacenamiento se realiza en `src/app/composition-root.ts`. Los casos de uso no dependen de Express ni de Prisma directamente.
 
-El backoffice expone casos de uso y puertos estrechos por capacidad (`products`, `inventory`, `orders`, `payments`, `fulfillment`, `customers` y `audit`). El composition root es el único lugar que conecta esos puertos con Prisma, sesiones, uploads y media. Los adaptadores comparten deliberadamente un store transaccional SQLite: aprobar/rechazar pagos debe modificar orden, reservas, inventario y auditoría dentro de una única transacción serializada, sin fingir transacciones distribuidas entre módulos.
+El backoffice expone casos de uso y puertos estrechos por capacidad (`products`, `inventory`, `suppliers`, `orders`, `payments`, `fulfillment`, `customers` y `audit`). El composition root es el único lugar que conecta esos puertos con Prisma, sesiones, uploads y media. Los adaptadores comparten deliberadamente un store transaccional SQLite: aprobar/rechazar pagos debe modificar orden, reservas, inventario y auditoría dentro de una única transacción serializada, sin fingir transacciones distribuidas entre módulos.
 
 La API actual para el frontend es `/api/v2`. Las respuestas exitosas usan `{ data, meta }` y los errores usan Problem Details (`code`, `status`, `title`, `detail`, `requestId`). El contrato `/api/v1` fue retirado al completar la migración.
 
@@ -44,7 +44,7 @@ El proyecto está diseñado para una sola instancia mientras use SQLite y almace
 
 ## Datos de desarrollo
 
-`pnpm db:seed` es idempotente y crea diecisiete productos publicados con imágenes locales, siete órdenes representativas para el CMS (incluido un comprobante privado), los once tipos TCG, accesorios, metadatos de colección, inventario, retiro, envíos y los accesos de prueba:
+`pnpm db:seed` es idempotente y crea diecisiete productos publicados con imágenes locales, tres proveedores de ejemplo (dos activos y uno inactivo), siete órdenes representativas para el CMS (incluido un comprobante privado), los once tipos TCG, accesorios, metadatos de colección, inventario, retiro, envíos y los accesos de prueba:
 
 - Usuario: `user@cardshop.test` / `User123!seed-card-shop`
 - Admin: `admin@cardshop.test` / `Admin123!seed-card-shop`
@@ -52,3 +52,5 @@ El proyecto está diseñado para una sola instancia mientras use SQLite y almace
 El acceso administrativo usa únicamente email y contraseña. Estas credenciales son exclusivamente para desarrollo y deben cambiarse antes de cualquier entorno compartido.
 
 Los administradores se crean únicamente desde la terminal con `pnpm admin:create`; no existe registro administrativo por HTTP. El comando solicita email, nombre opcional y una contraseña de al menos 12 caracteres.
+
+La agenda de proveedores está disponible en `http://localhost:3001/admin/suppliers`. Los proveedores se pueden crear, editar, desactivar y reactivar; la baja es lógica para conservar la información y la auditoría.

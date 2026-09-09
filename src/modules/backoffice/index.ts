@@ -4,6 +4,7 @@ export type {
   AdminCmsRepositories, AuditAdminRepository, CustomerAdminRepository, DashboardReader,
   FulfillmentAdminRepository, InventoryAdminRepository, OrderAdminRepository,
   PaymentAdminRepository, ProductAdminRepository,
+  SupplierAdminRepository,
 } from './application/ports.js';
 export type * from './application/dtos.js';
 export { createPrismaAdminCmsRepositories } from './infrastructure/create-prisma-admin-cms-repositories.js';

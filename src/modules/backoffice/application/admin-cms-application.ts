@@ -7,6 +7,7 @@ import { InventoryAdminUseCases } from './use-cases/inventory-admin-use-cases.js
 import { OrderAdminUseCases } from './use-cases/order-admin-use-cases.js';
 import { PaymentAdminUseCases } from './use-cases/payment-admin-use-cases.js';
 import { ProductAdminUseCases } from './use-cases/product-admin-use-cases.js';
+import { SupplierAdminUseCases } from './use-cases/supplier-admin-use-cases.js';
 
 export type AdminCmsApplication = {
   dashboard: DashboardQueries;
@@ -17,6 +18,7 @@ export type AdminCmsApplication = {
   fulfillment: FulfillmentAdminUseCases;
   customers: CustomerQueries;
   audit: AuditQueries;
+  suppliers: SupplierAdminUseCases;
 };
 
 export type AdminCmsApplicationConfig = { integrations: DashboardDto['integrations'] };
@@ -31,5 +33,6 @@ export function createAdminCmsApplication(repositories: AdminCmsRepositories, co
     fulfillment: new FulfillmentAdminUseCases(repositories.fulfillment),
     customers: new CustomerQueries(repositories.customers),
     audit: new AuditQueries(repositories.audit),
+    suppliers: new SupplierAdminUseCases(repositories.suppliers),
   };
 }

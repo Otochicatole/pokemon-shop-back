@@ -8,6 +8,7 @@ import { InventoryAdminRepositoryAdapter } from './repositories/inventory-admin-
 import { OrderAdminRepositoryAdapter } from './repositories/order-admin-repository.js';
 import { PaymentAdminRepositoryAdapter } from './repositories/payment-admin-repository.js';
 import { ProductAdminRepositoryAdapter } from './repositories/product-admin-repository.js';
+import { SupplierAdminRepositoryAdapter } from './repositories/supplier-admin-repository.js';
 
 export type WriteCoordinator = { run<T>(operation: () => Promise<T>): Promise<T> };
 
@@ -27,5 +28,6 @@ export function createPrismaAdminCmsRepositories(prisma: PrismaClient, coordinat
     fulfillment: new FulfillmentAdminRepositoryAdapter(store),
     customers: new CustomerAdminRepositoryAdapter(store),
     audit: new AuditAdminRepositoryAdapter(store),
+    suppliers: new SupplierAdminRepositoryAdapter(store),
   };
 }

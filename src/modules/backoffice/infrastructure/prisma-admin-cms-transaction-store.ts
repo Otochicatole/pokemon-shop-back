@@ -2,10 +2,10 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { badRequest, conflict, notFound } from '../../../shared/errors.js';
 import { parseMinor } from '../../../shared/money.js';
 import type { PickupPointWrite, ShippingZoneWrite } from '../application/ports.js';
-import type { JsonValue, OrderDto, OrderStatusMutationDto, RefundDto, TransferReviewDto } from '../application/dtos.js';
+import type { JsonValue, OrderDto, OrderStatusMutationDto, RefundDto, SupplierDto, TransferReviewDto } from '../application/dtos.js';
 import type {
   AdminActor, AuditListQuery, CustomerListQuery, OrderListQuery, OrderStatusValue,
-  ProductListQuery, ProductPatch, ProductWrite,
+  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierWrite,
 } from '../domain/admin-cms.js';
 import { allowedOrderTransitions } from '../domain/admin-cms.js';
 
@@ -58,6 +58,14 @@ function mapProduct(value: ProductRecord) {
     pokemonCard: value.pokemonCard,
     images: value.images.map((image) => ({ id: image.id, fileId: image.fileId, url: `/media/public/${image.fileId}`, altText: image.altText, sortOrder: image.sortOrder, createdAt: image.createdAt })),
     publishedAt: value.publishedAt, archivedAt: value.archivedAt, createdAt: value.createdAt, updatedAt: value.updatedAt,
+  };
+}
+
+function mapSupplier(value: { id: string; name: string; contactName: string | null; email: string | null; phone: string | null; address: string | null; notes: string | null; active: boolean; version: number; createdAt: Date; updatedAt: Date }): SupplierDto {
+  return {
+    id: value.id, name: value.name, contactName: value.contactName, email: value.email,
+    phone: value.phone, address: value.address, notes: value.notes, active: value.active,
+    version: value.version, createdAt: value.createdAt, updatedAt: value.updatedAt,
   };
 }
 
@@ -297,6 +305,75 @@ export class PrismaAdminCmsTransactionStore {
   }
 
   listInventory(query: ProductListQuery) { return this.listProducts(query); }
+
+  async listSuppliers(query: SupplierListQuery) {
+    const where: Prisma.SupplierWhereInput = {
+      ...(query.active === undefined ? {} : { active: query.active }),
+      ...(query.search ? { OR: [
+        { name: { contains: query.search } },
+        { contactName: { contains: query.search } },
+        { email: { contains: query.search } },
+        { phone: { contains: query.search } },
+      ] } : {}),
+    };
+    const rows = await this.prisma.supplier.findMany({ where, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], take: query.limit + 1, ...(query.cursor ? { skip: 1, cursor: { id: query.cursor } } : {}) });
+    const result = page(rows, query.limit, (value) => value.id);
+    return { data: result.data.map(mapSupplier), nextCursor: result.nextCursor };
+  }
+
+  async getSupplier(id: string) {
+    const supplier = await this.prisma.supplier.findUnique({ where: { id } });
+    if (!supplier) throw notFound('Supplier not found');
+    return { supplier: mapSupplier(supplier) };
+  }
+
+  createSupplier(actor: AdminActor, input: SupplierWrite) {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const supplier = await tx.supplier.create({ data: {
+        name: input.name,
+        contactName: cleanOptional(input.contactName),
+        email: cleanOptional(input.email),
+        phone: cleanOptional(input.phone),
+        address: cleanOptional(input.address),
+        notes: cleanOptional(input.notes),
+      } });
+      await tx.auditLog.create({ data: auditData(actor, 'SUPPLIER_CREATED', 'Supplier', supplier.id, { name: supplier.name }) });
+      return { supplier: mapSupplier(supplier) };
+    })).catch(throwCmsWriteError);
+  }
+
+  updateSupplier(actor: AdminActor, id: string, input: SupplierPatch) {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const existing = await tx.supplier.findUnique({ where: { id } });
+      if (!existing) throw notFound('Supplier not found');
+      const changed = await tx.supplier.updateMany({ where: { id, version: input.expectedVersion }, data: {
+        ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.contactName !== undefined ? { contactName: cleanOptional(input.contactName) } : {}),
+        ...(input.email !== undefined ? { email: cleanOptional(input.email) } : {}),
+        ...(input.phone !== undefined ? { phone: cleanOptional(input.phone) } : {}),
+        ...(input.address !== undefined ? { address: cleanOptional(input.address) } : {}),
+        ...(input.notes !== undefined ? { notes: cleanOptional(input.notes) } : {}),
+        version: { increment: 1 },
+      } });
+      if (changed.count !== 1) throw conflict('SUPPLIER_CHANGED', 'Supplier was modified by another administrator');
+      await tx.auditLog.create({ data: auditData(actor, 'SUPPLIER_UPDATED', 'Supplier', id, { fromVersion: input.expectedVersion, toVersion: input.expectedVersion + 1, nameChanged: input.name !== undefined }) });
+      const supplier = await tx.supplier.findUniqueOrThrow({ where: { id } });
+      return { supplier: mapSupplier(supplier) };
+    }));
+  }
+
+  setSupplierActive(actor: AdminActor, id: string, active: boolean, expectedVersion: number) {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const existing = await tx.supplier.findUnique({ where: { id } });
+      if (!existing) throw notFound('Supplier not found');
+      if (existing.version !== expectedVersion) throw conflict('SUPPLIER_CHANGED', 'Supplier was modified by another administrator');
+      if (existing.active === active) return { id, active, version: existing.version };
+      const changed = await tx.supplier.updateMany({ where: { id, version: expectedVersion }, data: { active, version: { increment: 1 } } });
+      if (changed.count !== 1) throw conflict('SUPPLIER_CHANGED', 'Supplier was modified by another administrator');
+      await tx.auditLog.create({ data: auditData(actor, active ? 'SUPPLIER_REACTIVATED' : 'SUPPLIER_DEACTIVATED', 'Supplier', id) });
+      return { id, active, version: expectedVersion + 1 };
+    }));
+  }
 
   async listInventoryAdjustments(productId: string, cursor: string | undefined, limit: number) {
     const exists = await this.prisma.product.count({ where: { id: productId } });

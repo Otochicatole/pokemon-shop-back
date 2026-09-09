@@ -62,6 +62,35 @@ export const shippingZoneWriteSchema = z.object({ name: z.string().trim().min(1)
 export const pickupPointWriteSchema = z.object({ name: z.string().trim().min(1).max(100), address: z.string().trim().min(1).max(300), active: z.boolean().default(true) });
 export const activeSchema = z.object({ active: z.boolean() });
 
+const supplierOptionalText = (max: number) => z.preprocess(
+  (value) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    return trimmed === '' ? null : trimmed;
+  },
+  z.string().max(max).nullable().optional(),
+);
+export const supplierWriteSchema = z.object({
+  name: z.string().trim().min(1).max(180),
+  contactName: supplierOptionalText(120),
+  email: z.preprocess(
+    (value) => {
+      if (value === null || value === undefined) return value;
+      if (typeof value !== 'string') return value;
+      const trimmed = value.trim();
+      return trimmed === '' ? null : trimmed;
+    },
+    z.string().email().max(254).nullable().optional(),
+  ),
+  phone: supplierOptionalText(40),
+  address: supplierOptionalText(300),
+  notes: supplierOptionalText(2000),
+});
+export const supplierPatchSchema = supplierWriteSchema.partial().extend({ expectedVersion: z.number().int().min(1) });
+export const supplierActiveSchema = activeSchema.extend({ expectedVersion: z.number().int().min(1) });
+export const supplierListQuerySchema = cursorQuery.extend({ search: optionalText(180), active: booleanQuery });
+
 export const customerListQuerySchema = cursorQuery.extend({ search: optionalText(180), status: z.enum(['ACTIVE', 'SUSPENDED']).optional(), verified: booleanQuery });
 export const auditListQuerySchema = cursorQuery.extend({ actorId: z.string().uuid().optional(), action: optionalText(100), entityType: optionalText(100), requestId: optionalText(150), from: dateQuery, to: dateQuery });
 export const dashboardQuerySchema = z.object({ range: z.enum(['TODAY', '7D', '30D']).default('7D') });
