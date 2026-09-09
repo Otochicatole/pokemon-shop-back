@@ -34,7 +34,7 @@ function mapProduct(product: any) {
   };
 }
 
-const include = { pokemonCard: true, inventory: true, images: { orderBy: { sortOrder: 'asc' as const }, include: { file: true } } };
+const include = { pokemonCard: true, inventory: true, images: { where: { retiredAt: null }, orderBy: { sortOrder: 'asc' as const }, include: { file: true } } };
 
 export function createCatalogRouter(prisma: PrismaClient): Router {
   const router = Router();
@@ -61,4 +61,3 @@ export function createCatalogRouter(prisma: PrismaClient): Router {
   });
   return router;
 }
-

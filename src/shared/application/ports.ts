@@ -42,10 +42,6 @@ export interface OAuthProvider {
   exchangeCallback(input: unknown): Promise<unknown>;
 }
 
-export interface TotpService {
-  verify(secret: string, token: string): boolean;
-}
-
 export interface PaymentGateway {
   createCheckout(input: unknown): Promise<unknown>;
   reconcile(externalId: string): Promise<void>;

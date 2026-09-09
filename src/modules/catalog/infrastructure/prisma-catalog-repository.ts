@@ -6,7 +6,7 @@ import type { CatalogQuery, CatalogRepository } from '../application/list-produc
 const include = {
   pokemonCard: true,
   inventory: true,
-  images: { orderBy: { sortOrder: 'asc' as const }, include: { file: true } },
+  images: { where: { retiredAt: null }, orderBy: { sortOrder: 'asc' as const }, include: { file: true } },
 } satisfies Prisma.ProductInclude;
 type ProductRecord = Prisma.ProductGetPayload<{ include: typeof include }>;
 

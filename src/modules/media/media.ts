@@ -11,6 +11,7 @@ import { notFound, forbidden, badRequest } from '../../shared/errors.js';
 
 const root = path.resolve(env.STORAGE_ROOT);
 const allowed = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const allowedDecodedFormats = new Set(['jpeg', 'png', 'webp']);
 
 export async function ensureStorage() {
   await Promise.all([mkdir(path.join(root, 'db'), { recursive: true }), mkdir(path.join(root, 'public'), { recursive: true }), mkdir(path.join(root, 'private'), { recursive: true }), mkdir(path.join(root, 'tmp'), { recursive: true })]);
@@ -19,10 +20,17 @@ export async function ensureStorage() {
 export async function saveImage(prisma: PrismaClient, file: Express.Multer.File, visibility: 'PUBLIC' | 'PRIVATE', folder: 'products' | 'receipts') {
   if (!file || !allowed.has(file.mimetype)) throw badRequest('INVALID_FILE_TYPE', 'Only JPEG, PNG and WebP images are accepted');
   if (folder === 'receipts' && file.size > 5 * 1024 * 1024) throw badRequest('FILE_TOO_LARGE', 'Transfer receipts are limited to 5 MB');
-  const image = sharp(file.buffer, { limitInputPixels: 40_000_000 });
-  const metadata = await image.metadata();
-  if (!metadata.width || !metadata.height || metadata.width > 8000 || metadata.height > 8000) throw badRequest('INVALID_IMAGE_DIMENSIONS', 'Image dimensions are not allowed');
-  const output = await image.rotate().webp({ quality: 84 }).toBuffer();
+  let output: Buffer;
+  try {
+    const image = sharp(file.buffer, { limitInputPixels: 40_000_000, failOn: 'warning' });
+    const metadata = await image.metadata();
+    if (!metadata.format || !allowedDecodedFormats.has(metadata.format)) throw badRequest('INVALID_FILE_TYPE', 'The decoded file is not an allowed image');
+    if (!metadata.width || !metadata.height || metadata.width > 8000 || metadata.height > 8000) throw badRequest('INVALID_IMAGE_DIMENSIONS', 'Image dimensions are not allowed');
+    output = await image.rotate().webp({ quality: 84 }).toBuffer();
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && String(error.code).startsWith('INVALID_')) throw error;
+    throw badRequest('INVALID_IMAGE', 'The uploaded file is corrupt or is not a supported image');
+  }
   const fileId = randomUUID();
   const storageKey = `${visibility === 'PUBLIC' ? 'public' : 'private'}/${folder}/${fileId}.webp`;
   const absolute = safePath(storageKey);
@@ -34,6 +42,17 @@ export async function saveImage(prisma: PrismaClient, file: Express.Multer.File,
     await unlink(absolute).catch(() => undefined);
     throw error;
   }
+}
+
+/** Compensates a failed database attachment without ever removing referenced media. */
+export async function discardUnattachedFile(prisma: PrismaClient, fileId: string): Promise<boolean> {
+  const file = await prisma.storedFile.findUnique({ where: { id: fileId }, include: { productImage: true, transferReceipt: true } });
+  if (!file || file.productImage || file.transferReceipt) return false;
+  await unlink(safePath(file.storageKey)).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  });
+  await prisma.storedFile.deleteMany({ where: { id: fileId } });
+  return true;
 }
 
 function safePath(storageKey: string): string {
@@ -55,7 +74,7 @@ export function createMediaRouter(prisma: PrismaClient): Router {
     return res.sendFile(safePath(file.storageKey));
   });
   router.get('/private/:fileId', async (req: Request, res) => {
-    const file: any = await prisma.storedFile.findUnique({ where: { id: String(req.params.fileId) }, include: { transferReceipt: { include: { order: true } } } });
+    const file = await prisma.storedFile.findUnique({ where: { id: String(req.params.fileId) }, include: { transferReceipt: { include: { order: true } } } });
     if (!file || file.visibility !== 'PRIVATE') throw notFound('Media not found');
     const admin = currentAdmin(req);
     const user = currentUser(req);

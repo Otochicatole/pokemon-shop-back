@@ -1,9 +1,9 @@
 import { open, readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { app } from './app.js';
+import { app, composition } from './app.js';
 import { env } from './config/env.js';
 import { configureSqlite, prisma, writeCoordinator } from './infrastructure/prisma.js';
-import { ensureStorage } from './modules/media/media.js';
+import { ensureStorage } from './modules/media/index.js';
 import { logger } from './infrastructure/logger.js';
 import { ExpireReservations } from './modules/inventory/index.js';
 
@@ -50,8 +50,25 @@ async function acquireLock() {
   }
 }
 
-async function expireOrders() {
-  await new ExpireReservations({ prisma, writeCoordinator }).execute();
+let expirationRunning: Promise<void> | null = null;
+let mediaCleanupRunning: Promise<void> | null = null;
+
+function expireOrders(): Promise<void> {
+  if (expirationRunning) return expirationRunning;
+  expirationRunning = new ExpireReservations({ prisma, writeCoordinator }).execute()
+    .then(() => undefined)
+    .finally(() => { expirationRunning = null; });
+  return expirationRunning;
+}
+
+function cleanupRetiredImages(): Promise<void> {
+  if (mediaCleanupRunning) return mediaCleanupRunning;
+  mediaCleanupRunning = composition.applications.retiredImageCleanup.execute()
+    .then((result) => {
+      if (result.claimed > 0) logger.info(result, 'Retired product image cleanup completed');
+    })
+    .finally(() => { mediaCleanupRunning = null; });
+  return mediaCleanupRunning;
 }
 
 async function main() {
@@ -59,11 +76,36 @@ async function main() {
   const releaseLock = await acquireLock();
   await configureSqlite();
   const expirationTimer = setInterval(() => { void expireOrders().catch((error) => logger.error({ err: error }, 'Order expiry job failed')); }, 60_000);
+  const mediaCleanupTimer = setInterval(() => { void cleanupRetiredImages().catch((error) => logger.error({ err: error }, 'Retired product image cleanup failed')); }, 5 * 60_000);
   expirationTimer.unref();
+  mediaCleanupTimer.unref();
+  void cleanupRetiredImages().catch((error) => logger.error({ err: error }, 'Initial retired product image cleanup failed'));
   const server = app.listen(env.PORT, () => logger.info({ port: env.PORT }, 'back-card-shop listening'));
-  const shutdown = async () => { clearInterval(expirationTimer); server.close(); await releaseLock(); await prisma.$disconnect(); };
-  process.once('SIGINT', () => void shutdown().then(() => process.exit(0)));
-  process.once('SIGTERM', () => void shutdown().then(() => process.exit(0)));
+  let shuttingDown = false;
+  const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    clearInterval(expirationTimer);
+    clearInterval(mediaCleanupTimer);
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    const activeJobs = [expirationRunning, mediaCleanupRunning]
+      .filter((job): job is Promise<void> => job !== null);
+    await Promise.allSettled(activeJobs);
+    await releaseLock();
+    await prisma.$disconnect();
+  };
+  const exitGracefully = () => {
+    void shutdown()
+      .then(() => process.exit(0))
+      .catch((error) => {
+        logger.error({ err: error }, 'Graceful shutdown failed');
+        process.exit(1);
+      });
+  };
+  process.once('SIGINT', exitGracefully);
+  process.once('SIGTERM', exitGracefully);
 }
 
 main().catch(async (error) => { logger.fatal({ err: error }, 'Unable to start server'); await prisma.$disconnect(); process.exit(1); });

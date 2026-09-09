@@ -1,23 +1,35 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { z } from 'zod';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { env } from '../../config/env.js';
 import { AppError, badRequest, conflict, unauthorized } from '../../shared/errors.js';
 import { normalizeEmail, randomToken, sha256 } from '../../shared/ids.js';
-import { hashPassword, verifyPassword, encrypt, decrypt, verifyTotp, createTotp } from '../../shared/crypto.js';
-import { createAdminSession, createUserSession, currentAdmin, currentUser, requireAdmin, requireUser, revokeAdminSession, revokeUserSession, rotateCsrfToken } from '../../infrastructure/sessions.js';
+import { hashPassword, verifyPassword } from '../../shared/crypto.js';
+import {
+  createAdminSession,
+  createUserSession,
+  currentAdmin,
+  currentUser,
+  requireAdmin,
+  requireUser,
+  revokeAdminSession,
+  revokeUserSession,
+  rotateAdminCsrfToken,
+  rotateUserCsrfToken,
+} from '../../infrastructure/sessions.js';
 import { email } from '../../infrastructure/email.js';
 import { logger } from '../../infrastructure/logger.js';
 import { prisma as db } from '../../infrastructure/prisma.js';
 import { rateLimit } from '../../infrastructure/rate-limit.js';
 import { discovery, authorizationCodeGrant, buildAuthorizationUrl, calculatePKCECodeChallenge, randomNonce, randomPKCECodeVerifier, randomState } from 'openid-client';
-
-const registerSchema = z.object({ email: z.string().email(), password: z.string().min(12).max(128), name: z.string().trim().min(1).max(100).optional() });
-const loginSchema = z.object({ email: z.string().email(), password: z.string().min(1).max(128) });
-const adminLoginSchema = loginSchema.extend({ otp: z.string().regex(/^\d{6}$/) });
-const tokenSchema = z.object({ token: z.string().min(20).max(300) });
-const resetSchema = tokenSchema.extend({ password: z.string().min(12).max(128) });
+import {
+  adminLoginSchema,
+  forgotPasswordSchema,
+  loginSchema,
+  registerSchema,
+  resetSchema,
+  tokenSchema,
+} from './auth-schemas.js';
 const GOOGLE_COOKIE = env.cookieSecure ? '__Host-bcs_google_oauth' : 'bcs_google_oauth';
 const redirectTarget = () => env.frontendOrigins[0] ?? 'http://localhost:5173';
 
@@ -59,9 +71,8 @@ export function createAuthRouter(prisma: PrismaClient): Router {
 
   router.get('/csrf', async (req, res) => {
     const user = currentUser(req);
-    const admin = currentAdmin(req);
-    if (!user && !admin) return res.status(200).json({ csrfToken: null });
-    return res.status(200).json({ csrfToken: await rotateCsrfToken(req, res) });
+    if (!user) return res.status(200).json({ csrfToken: null });
+    return res.status(200).json({ csrfToken: await rotateUserCsrfToken(req, res) });
   });
 
   router.post('/register', rateLimit(5, 15 * 60 * 1000), async (req, res) => {
@@ -98,7 +109,7 @@ export function createAuthRouter(prisma: PrismaClient): Router {
   });
 
   router.post('/forgot-password', rateLimit(5, 15 * 60 * 1000), async (req, res) => {
-    const { email: inputEmail } = z.object({ email: z.string().email() }).parse(req.body);
+    const { email: inputEmail } = forgotPasswordSchema.parse(req.body);
     const user = await prisma.user.findUnique({ where: { email: normalizeEmail(inputEmail) } });
     if (user) {
       const raw = randomToken(32);
@@ -179,10 +190,13 @@ export function createAuthRouter(prisma: PrismaClient): Router {
 
 export function createAdminAuthRouter(prisma: PrismaClient): Router {
   const router = Router();
+  router.get('/csrf', requireAdmin, async (req, res) => {
+    return res.status(200).json({ csrfToken: await rotateAdminCsrfToken(req, res) });
+  });
   router.post('/login', rateLimit(5, 15 * 60 * 1000, (request) => `${request.ip}:${String(request.body?.email ?? '').toLowerCase()}`), async (req, res) => {
     const input = adminLoginSchema.parse(req.body);
     const admin = await prisma.admin.findUnique({ where: { email: normalizeEmail(input.email) } });
-    if (!admin || admin.status !== 'ACTIVE' || !(await verifyPassword(admin.passwordHash, input.password)) || !admin.totpSecretCipher || !verifyTotp(decrypt(admin.totpSecretCipher), input.otp)) throw unauthorized('Invalid credentials');
+    if (!admin || admin.status !== 'ACTIVE' || !(await verifyPassword(admin.passwordHash, input.password))) throw unauthorized('Invalid credentials');
     const session = await createAdminSession(admin.id, res, req);
     return res.json({ admin: { id: admin.id, email: admin.email, name: admin.name, role: 'SUPER_ADMIN' }, csrfToken: session.csrfToken });
   });
@@ -190,6 +204,3 @@ export function createAdminAuthRouter(prisma: PrismaClient): Router {
   router.get('/me', requireAdmin, (req, res) => res.json({ admin: { id: currentAdmin(req)!.admin.id, email: currentAdmin(req)!.admin.email, name: currentAdmin(req)!.admin.name, role: 'SUPER_ADMIN' } }));
   return router;
 }
-
-// Exported for the admin bootstrap command without exposing it through HTTP.
-export { createTotp };

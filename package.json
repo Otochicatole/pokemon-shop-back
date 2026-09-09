@@ -20,8 +20,8 @@
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
-    "admin:otp": "tsx src/cli/admin-otp.ts",
-    "admin:create": "tsx src/cli/create-admin.ts"
+    "admin:create": "tsx src/cli/create-admin.ts",
+    "media:cleanup": "tsx src/cli/cleanup-retired-images.ts"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "9.1.0",
@@ -36,7 +36,6 @@
     "multer": "2.2.0",
     "nodemailer": "9.0.5",
     "openid-client": "6.8.7",
-    "otpauth": "9.5.1",
     "pino": "9.9.4",
     "pino-http": "10.5.0",
     "sharp": "0.35.4",

@@ -10,7 +10,7 @@ import { currentUser, requireUser } from '../../infrastructure/sessions.js';
 import { prisma as db, writeCoordinator } from '../../infrastructure/prisma.js';
 import { publicOrderNumber, sha256 } from '../../shared/ids.js';
 import { moneyDto } from '../../shared/money.js';
-import { saveImage } from '../media/index.js';
+import { discardUnattachedFile, saveImage } from '../media/index.js';
 import { logger } from '../../infrastructure/logger.js';
 
 const itemSchema = z.object({ productId: z.string().uuid(), quantity: z.number().int().min(1).max(100), productVersion: z.number().int().min(1) });
@@ -31,13 +31,14 @@ function mapOrder(order: any) {
   return {
     id: order.id,
     number: order.number,
+    version: order.version,
     status: order.status,
     paymentMethod: order.paymentMethod,
     fulfillmentType: order.fulfillmentType,
     totals: { subtotal: moneyDto({ amountMinor: order.subtotalMinor, currency: 'ARS' }), shipping: moneyDto({ amountMinor: order.shippingMinor, currency: 'ARS' }), total: moneyDto({ amountMinor: order.totalMinor, currency: 'ARS' }) },
     expiresAt: order.expiresAt,
-    items: order.items?.map((item: any) => ({ productId: item.productId, sku: item.sku, name: item.productName, quantity: item.quantity, unitPrice: moneyDto({ amountMinor: item.unitPriceMinor, currency: 'ARS' }), lineTotal: moneyDto({ amountMinor: item.lineTotalMinor, currency: 'ARS' }) })),
-    fulfillment: order.fulfillmentType === 'SHIPMENT' ? { type: 'SHIPMENT', recipientName: order.recipientName, recipientPhone: order.recipientPhone, addressLine1: order.addressLine1, addressLine2: order.addressLine2, city: order.city, province: order.province, postalCode: order.postalCode, shippingRateId: order.shippingRateId } : { type: 'PICKUP', pickupPointId: order.pickupPointId },
+    items: order.items?.map((item: any) => ({ productId: item.productId, sku: item.sku, name: item.productName, imageFileId: item.imageFileId ?? null, imageUrl: item.imageFileId ? `/media/public/${item.imageFileId}` : null, quantity: item.quantity, unitPrice: moneyDto({ amountMinor: item.unitPriceMinor, currency: 'ARS' }), lineTotal: moneyDto({ amountMinor: item.lineTotalMinor, currency: 'ARS' }) })),
+    fulfillment: order.fulfillmentType === 'SHIPMENT' ? { type: 'SHIPMENT', recipientName: order.recipientName, recipientPhone: order.recipientPhone, addressLine1: order.addressLine1, addressLine2: order.addressLine2, city: order.city, province: order.province, postalCode: order.postalCode, shippingRateId: order.shippingRateId, shippingZoneName: order.shippingZoneName ?? null, shippingRateName: order.shippingRateName ?? null, shippingRatePrice: order.shippingRatePriceMinor === null || order.shippingRatePriceMinor === undefined ? null : moneyDto({ amountMinor: order.shippingRatePriceMinor, currency: 'ARS' }) } : { type: 'PICKUP', pickupPointId: order.pickupPointId, pickupPointName: order.pickupPointName ?? null, pickupPointAddress: order.pickupPointAddress ?? null },
     payment: order.payment ? { method: order.payment.method, status: order.payment.status, bankReference: order.payment.transfer?.reference ?? null, bankInstructions: order.payment.method === 'BANK_TRANSFER' && bankConfigured ? { bankName: env.BANK_NAME, accountHolder: env.BANK_ACCOUNT_HOLDER, cbu: env.BANK_CBU ?? null, alias: env.BANK_ALIAS ?? null } : null, receipt: order.transferReceipts?.[0] ? { fileId: order.transferReceipts[0].fileId, review: order.transferReceipts[0].review, createdAt: order.transferReceipts[0].createdAt } : null, checkoutUrl: order.payment.mercadoPago?.checkoutUrl ?? null, paymentSessionStatus: order.payment.mercadoPago && !order.payment.mercadoPago.checkoutUrl ? 'RETRY_REQUIRED' : 'READY' } : null,
     createdAt: order.createdAt,
   };
@@ -47,7 +48,7 @@ async function calculateCheckout(tx: any, input: CheckoutInput) {
   const products = [] as any[];
   let subtotal = 0n;
   for (const item of input.items) {
-    const product = await tx.product.findUnique({ where: { id: item.productId }, include: { pokemonCard: true, inventory: true, images: { orderBy: { sortOrder: 'asc' } } } });
+    const product = await tx.product.findUnique({ where: { id: item.productId }, include: { pokemonCard: true, inventory: true, images: { where: { retiredAt: null }, orderBy: { sortOrder: 'asc' } } } });
     if (!product || product.status !== ProductStatus.PUBLISHED) throw conflict('PRODUCT_UNAVAILABLE', 'A product is no longer available');
     if (product.version !== item.productVersion) throw conflict('PRODUCT_CHANGED', 'A product changed since it was loaded', { productId: item.productId, currentVersion: product.version });
     const available = (product.inventory?.onHand ?? 0) - (product.inventory?.reserved ?? 0);
@@ -58,16 +59,19 @@ async function calculateCheckout(tx: any, input: CheckoutInput) {
   }
 
   let shipping = 0n;
+  let fulfillmentSnapshot: { shippingZoneName?: string; shippingRateName?: string; shippingRatePriceMinor?: bigint; pickupPointName?: string; pickupPointAddress?: string } = {};
   if (input.fulfillment.type === 'SHIPMENT') {
     const shipment = input.fulfillment;
     const rate = await tx.shippingRate.findUnique({ where: { id: shipment.shippingRateId }, include: { zone: { include: { provinces: true } } } });
     if (!rate || !rate.active || !rate.zone.active || !rate.zone.provinces.some((province: any) => province.province.toLowerCase() === shipment.province.toLowerCase())) throw badRequest('INVALID_SHIPPING_RATE', 'Shipping rate is not valid for this province');
     shipping = rate.priceMinor;
+    fulfillmentSnapshot = { shippingZoneName: rate.zone.name, shippingRateName: rate.name, shippingRatePriceMinor: rate.priceMinor };
   } else {
     const pickup = await tx.pickupPoint.findUnique({ where: { id: input.fulfillment.pickupPointId } });
     if (!pickup?.active) throw badRequest('INVALID_PICKUP_POINT', 'Pickup point is not available');
+    fulfillmentSnapshot = { pickupPointName: pickup.name, pickupPointAddress: pickup.address };
   }
-  return { products, subtotal, shipping, total: subtotal + shipping };
+  return { products, subtotal, shipping, total: subtotal + shipping, fulfillmentSnapshot };
 }
 
 async function createMercadoPreference(order: any) {
@@ -77,7 +81,7 @@ async function createMercadoPreference(order: any) {
   const response = await preference.create({ body: {
     items: order.items.map((item: any) => ({ id: item.sku, title: item.productName, quantity: item.quantity, currency_id: 'ARS', unit_price: Number(item.unitPriceMinor) / 100 })),
     external_reference: order.number,
-    notification_url: `${env.PUBLIC_API_URL ?? `http://localhost:${env.PORT}`}/api/v1/webhooks/mercado-pago`,
+    notification_url: `${env.PUBLIC_API_URL ?? `http://localhost:${env.PORT}`}/api/v2/webhooks/mercado-pago`,
     back_urls: { success: `${env.frontendOrigins[0] ?? 'http://localhost:5173'}/orders/${order.number}`, failure: `${env.frontendOrigins[0] ?? 'http://localhost:5173'}/orders/${order.number}`, pending: `${env.frontendOrigins[0] ?? 'http://localhost:5173'}/orders/${order.number}` },
     auto_return: 'approved',
     expires: true,
@@ -104,12 +108,12 @@ async function reconcileMercadoPayment(externalId: string) {
       const current = await tx.order.findUniqueOrThrow({ where: { id: payment.orderId } });
       if (!valid) {
         await tx.payment.update({ where: { id: payment.id }, data: { status: 'REQUIRES_REVIEW', providerReference: externalId } });
-        if (!['PAID', 'COMPLETED', 'REFUND_RECORDED'].includes(current.status)) await tx.order.update({ where: { id: current.id }, data: { status: 'PAYMENT_REQUIRES_REVIEW' } });
+        if (!['PAID', 'COMPLETED', 'REFUND_RECORDED'].includes(current.status)) await tx.order.update({ where: { id: current.id }, data: { status: 'PAYMENT_REQUIRES_REVIEW', version: { increment: 1 } } });
         return;
       }
       await tx.payment.update({ where: { id: payment.id }, data: { status: mapped as any, providerReference: externalId } });
       if (mapped === 'APPROVED' && ['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(current.status) && current.expiresAt && current.expiresAt > new Date()) {
-        await tx.order.update({ where: { id: current.id }, data: { status: 'PAID' } });
+        await tx.order.update({ where: { id: current.id }, data: { status: 'PAID', version: { increment: 1 } } });
         await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'PAID', note: 'Mercado Pago approved webhook' } });
         const reservations = await tx.inventoryReservation.findMany({ where: { orderId: current.id, consumedAt: null, releasedAt: null } });
         for (const reservation of reservations) {
@@ -117,10 +121,10 @@ async function reconcileMercadoPayment(externalId: string) {
           await tx.inventoryReservation.update({ where: { id: reservation.id }, data: { consumedAt: new Date() } });
         }
       } else if (mapped === 'REJECTED' && ['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(current.status)) {
-        await tx.order.update({ where: { id: current.id }, data: { status: 'CANCELLED' } });
+        await tx.order.update({ where: { id: current.id }, data: { status: 'CANCELLED', version: { increment: 1 } } });
         await releaseReservations(tx, current.id);
       } else if (mapped === 'APPROVED' && current.status === 'EXPIRED') {
-        await tx.order.update({ where: { id: current.id }, data: { status: 'PAYMENT_REQUIRES_REVIEW' } });
+        await tx.order.update({ where: { id: current.id }, data: { status: 'PAYMENT_REQUIRES_REVIEW', version: { increment: 1 } } });
       }
     }));
   } catch (error) {
@@ -167,8 +171,9 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
       const expiresAt = new Date(Date.now() + (input.paymentMethod === 'BANK_TRANSFER' ? 24 * 60 * 60 * 1000 : 30 * 60 * 1000));
       const order = await tx.order.create({ data: {
         userId: user.id, number: publicOrderNumber(), paymentMethod: input.paymentMethod, fulfillmentType: input.fulfillment.type, subtotalMinor: quote.subtotal, shippingMinor: quote.shipping, totalMinor: quote.total, idempotencyKey: key, idempotencyHash: hash, expiresAt,
+        ...quote.fulfillmentSnapshot,
         ...(input.fulfillment.type === 'SHIPMENT' ? { shippingRateId: input.fulfillment.shippingRateId, recipientName: input.fulfillment.recipientName, recipientPhone: input.fulfillment.recipientPhone, addressLine1: input.fulfillment.addressLine1, addressLine2: input.fulfillment.addressLine2, city: input.fulfillment.city, province: input.fulfillment.province, postalCode: input.fulfillment.postalCode } : { pickupPointId: input.fulfillment.pickupPointId }),
-        items: { create: quote.products.map(({ item, product, line }) => ({ productId: product.id, sku: product.sku, productName: product.name, productSnapshot: JSON.stringify({ ...product, priceMinor: product.priceMinor.toString(), inventory: undefined }), unitPriceMinor: product.priceMinor, quantity: item.quantity, lineTotalMinor: line })) },
+        items: { create: quote.products.map(({ item, product, line }) => ({ productId: product.id, sku: product.sku, productName: product.name, productSnapshot: JSON.stringify({ ...product, priceMinor: product.priceMinor.toString(), inventory: undefined }), imageFileId: product.images[0]?.fileId ?? null, unitPriceMinor: product.priceMinor, quantity: item.quantity, lineTotalMinor: line })) },
         payment: { create: { method: input.paymentMethod, amountMinor: quote.total, ...(input.paymentMethod === 'BANK_TRANSFER' ? { transfer: { create: { reference: publicOrderNumber() } } } : { mercadoPago: { create: { expiresAt } } }) } },
         statusHistory: { create: { toStatus: 'PENDING_PAYMENT', note: 'Order created' } },
       }, include: { items: true, payment: { include: { transfer: true, mercadoPago: true } } } });
@@ -215,7 +220,7 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
     await writeCoordinator.run(() => prisma.$transaction(async (tx) => {
       const current = await tx.order.findUnique({ where: { id: order.id } });
       if (!current || !['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(current.status)) throw conflict('ORDER_NOT_CANCELLABLE', 'Order cannot be cancelled');
-      await tx.order.update({ where: { id: current.id }, data: { status: 'CANCELLED' } });
+      await tx.order.update({ where: { id: current.id }, data: { status: 'CANCELLED', version: { increment: 1 } } });
       await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'CANCELLED', note: 'Cancelled by customer' } });
       await releaseReservations(tx, current.id);
     }));
@@ -228,9 +233,23 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
     if (!order || !order.payment) throw notFound('Order not found');
     if (!['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(order.status) || !req.file) throw badRequest('INVALID_RECEIPT', 'A valid receipt is required for this order');
     const file = await saveImage(prisma, req.file, 'PRIVATE', 'receipts');
-    await prisma.transferReceipt.create({ data: { orderId: order.id, fileId: file.id } });
-    await prisma.payment.update({ where: { id: order.payment.id }, data: { status: PaymentStatus.UNDER_REVIEW } });
-    await prisma.order.update({ where: { id: order.id }, data: { status: 'PAYMENT_REVIEW' } });
+    try {
+      await writeCoordinator.run(() => prisma.$transaction(async (tx) => {
+        const current = await tx.order.findUnique({ where: { id: order.id }, include: { payment: true } });
+        if (!current?.payment || !['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(current.status)) {
+          throw conflict('ORDER_NOT_RECEIPT_ELIGIBLE', 'Order no longer accepts transfer receipts');
+        }
+        await tx.transferReceipt.create({ data: { orderId: current.id, fileId: file.id } });
+        await tx.payment.update({ where: { id: current.payment.id }, data: { status: PaymentStatus.UNDER_REVIEW } });
+        if (current.status !== 'PAYMENT_REVIEW') {
+          await tx.order.update({ where: { id: current.id }, data: { status: 'PAYMENT_REVIEW', version: { increment: 1 } } });
+          await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'PAYMENT_REVIEW', note: 'Transfer receipt submitted' } });
+        }
+      }));
+    } catch (error) {
+      await discardUnattachedFile(prisma, file.id).catch(() => false);
+      throw error;
+    }
     return res.status(201).json({ accepted: true, fileId: file.id });
   });
 

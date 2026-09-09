@@ -114,6 +114,14 @@ enum OutboxStatus {
   FAILED
 }
 
+enum FileCleanupStatus {
+  PENDING
+  PROCESSING
+  QUARANTINED
+  RETAINED
+  COMPLETED
+}
+
 model User {
   id                String              @id @default(uuid())
   email             String              @unique
@@ -294,12 +302,13 @@ model ProductImage {
   altText     String?
   sortOrder   Int          @default(0)
   createdAt   DateTime     @default(now())
+  retiredAt   DateTime?
   createdById String?
   product     Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
   file        StoredFile   @relation(fields: [fileId], references: [id], onDelete: Restrict)
   createdBy   Admin?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
-  @@index([productId, sortOrder])
+  @@index([productId, retiredAt, sortOrder])
 }
 
 model ShippingZone {
@@ -310,6 +319,8 @@ model ShippingZone {
   rates       ShippingRate[]
   createdAt   DateTime               @default(now())
   updatedAt   DateTime               @updatedAt
+
+  @@index([active, name])
 }
 
 model ShippingZoneProvince {
@@ -341,6 +352,8 @@ model PickupPoint {
   active     Boolean  @default(true)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+
+  @@index([active, name])
 }
 
 model Order {
@@ -348,6 +361,7 @@ model Order {
   userId             String
   number             String                 @unique
   status             OrderStatus            @default(PENDING_PAYMENT)
+  version            Int                    @default(1)
   paymentMethod      PaymentMethod
   fulfillmentType    FulfillmentType
   currency           String                 @default("ARS")
@@ -356,6 +370,11 @@ model Order {
   totalMinor        BigInt
   shippingRateId    String?
   pickupPointId     String?
+  shippingZoneName String?
+  shippingRateName String?
+  shippingRatePriceMinor BigInt?
+  pickupPointName   String?
+  pickupPointAddress String?
   recipientName     String?
   recipientPhone    String?
   addressLine1      String?
@@ -379,6 +398,9 @@ model Order {
   @@unique([userId, idempotencyKey])
   @@index([userId, createdAt])
   @@index([status, expiresAt])
+  @@index([status, createdAt])
+  @@index([paymentMethod, createdAt])
+  @@index([createdAt])
 }
 
 model OrderItem {
@@ -388,6 +410,7 @@ model OrderItem {
   sku                String
   productName        String
   productSnapshot    String
+  imageFileId        String?
   unitPriceMinor     BigInt
   quantity           Int
   lineTotalMinor     BigInt
@@ -395,6 +418,7 @@ model OrderItem {
   product            Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@index([orderId])
+  @@index([imageFileId])
 }
 
 model InventoryReservation {
@@ -428,6 +452,9 @@ model Payment {
   mercadoPago       MercadoPagoPayment?
   refunds           RefundRecord[]
   webhookEvents     WebhookEvent[]
+
+  @@index([status, updatedAt])
+  @@index([method, status, updatedAt])
 }
 
 model BankTransfer {
@@ -439,6 +466,8 @@ model BankTransfer {
   reviewedById       String?
   payment            Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
   reviewedBy         Admin?   @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([reviewStatus, reviewedAt])
 }
 
 model TransferReceipt {
@@ -455,6 +484,7 @@ model TransferReceipt {
   reviewedBy  Admin?              @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@index([orderId, createdAt])
+  @@index([review, createdAt])
 }
 
 model MercadoPagoPayment {
@@ -486,6 +516,7 @@ model WebhookEvent {
 model RefundRecord {
   id              String   @id @default(uuid())
   paymentId       String
+  fullRefundKey   String?  @unique
   amountMinor     BigInt
   currency        String   @default("ARS")
   reason          String
@@ -534,6 +565,22 @@ model StoredFile {
   transferReceipt TransferReceipt?
 }
 
+model FileCleanupJob {
+  id          String            @id @default(uuid())
+  fileId      String            @unique
+  storageKey  String
+  status      FileCleanupStatus @default(PENDING)
+  attempts    Int               @default(0)
+  availableAt DateTime          @default(now())
+  claimedAt   DateTime?
+  completedAt DateTime?
+  lastError   String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([status, availableAt])
+}
+
 model AuditLog {
   id         String   @id @default(uuid())
   actorType  String
@@ -547,6 +594,8 @@ model AuditLog {
 
   @@index([entityType, entityId, createdAt])
   @@index([actorType, actorId, createdAt])
+  @@index([requestId, createdAt])
+  @@index([action, createdAt])
 }
 
 model OutboxMessage {
