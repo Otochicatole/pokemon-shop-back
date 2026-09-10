@@ -59,6 +59,17 @@ export type SupplierWrite = {
 
 export type SupplierPatch = Partial<SupplierWrite> & { expectedVersion: number };
 
+export type NewsWrite = {
+  title: string;
+  summary: string;
+  sortOrder: number;
+  active?: boolean;
+  startsAt: Date | null;
+  endsAt: Date | null;
+};
+
+export type NewsPatch = Partial<NewsWrite> & { expectedVersion: number };
+
 export type LoyaltyProgramWrite = {
   enabled: boolean;
   spendPerPointMinor: string;
@@ -100,6 +111,7 @@ export type OrderListQuery = CursorPage & {
 export type CustomerListQuery = CursorPage & { search?: string; status?: 'ACTIVE' | 'SUSPENDED'; verified?: boolean };
 export type AuditListQuery = CursorPage & { actorId?: string; action?: string; entityType?: string; requestId?: string; from?: Date; to?: Date };
 export type SupplierListQuery = CursorPage & { search?: string; active?: boolean };
+export type NewsListQuery = CursorPage & { search?: string; active?: boolean };
 
 export const allowedOrderTransitions: Readonly<Record<OrderStatusValue, readonly OrderStatusValue[]>> = {
   PENDING_PAYMENT: [], PAYMENT_REVIEW: [],

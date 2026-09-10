@@ -76,6 +76,7 @@ export function createApp(composition = createCompositionRoot()): Express {
   // v2 exposes the business capabilities through explicit module boundaries.
   app.use('/api/v2', responseEnvelopeV2());
   app.use('/api/v2/catalog', composition.routers.catalog);
+  app.use('/api/v2/news', composition.routers.news);
   mount('/api/v2');
   app.use('/media', composition.routers.media);
   app.use(composition.routers.docs);

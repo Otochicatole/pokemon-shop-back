@@ -234,6 +234,20 @@ export type SupplierDto = {
 export type SupplierDetailDto = { supplier: SupplierDto };
 export type SupplierActiveMutationDto = { id: string; active: boolean; version: number };
 
+export type NewsDto = {
+  id: string;
+  title: string;
+  summary: string;
+  sortOrder: number;
+  active: boolean;
+  startsAt: Date | null;
+  endsAt: Date | null;
+  version: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+export type NewsDetailDto = { news: NewsDto };
+
 export type CustomerSummaryDto = OrderCustomerDto & { ordersCount: number; paidTotal: MoneyDto; loyalty: LoyaltyAccountDto };
 export type CustomerDetailDto = {
   customer: OrderCustomerDto & { updatedAt: Date; ordersCount: number; paidTotal: MoneyDto; loyalty: LoyaltyAccountDto; orders: OrderDto[] };

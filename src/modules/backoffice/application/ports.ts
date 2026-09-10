@@ -6,11 +6,13 @@ import type {
   ShippingZoneResultDto, TransferReviewDto,
   SupplierActiveMutationDto, SupplierDetailDto, SupplierDto,
   LoyaltyProgramDto, TransferSettingsDto,
+  NewsDetailDto, NewsDto,
 } from './dtos.js';
 import type {
   AdminActor, AuditListQuery, CustomerListQuery, OrderListQuery, OrderStatusValue,
   ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierWrite,
   LoyaltyProgramWrite, TransferSettingsWrite,
+  NewsListQuery, NewsPatch, NewsWrite,
 } from '../domain/admin-cms.js';
 
 export interface DashboardReader {
@@ -87,6 +89,14 @@ export interface TransferSettingsAdminRepository {
   updateTransferSettings(actor: AdminActor, input: TransferSettingsWrite): Promise<TransferSettingsDto>;
 }
 
+export interface NewsAdminRepository {
+  listNews(query: NewsListQuery): Promise<CursorPageDto<NewsDto>>;
+  getNews(id: string): Promise<NewsDetailDto>;
+  createNews(actor: AdminActor, input: NewsWrite): Promise<NewsDetailDto>;
+  updateNews(actor: AdminActor, id: string, input: NewsPatch): Promise<NewsDetailDto>;
+  deleteNews(actor: AdminActor, id: string, expectedVersion: number): Promise<void>;
+}
+
 export type AdminCmsRepositories = {
   dashboard: DashboardReader;
   products: ProductAdminRepository;
@@ -99,6 +109,7 @@ export type AdminCmsRepositories = {
   suppliers: SupplierAdminRepository;
   loyalty: LoyaltyAdminRepository;
   transferSettings: TransferSettingsAdminRepository;
+  news: NewsAdminRepository;
 };
 
 export type ShippingZoneWrite = {

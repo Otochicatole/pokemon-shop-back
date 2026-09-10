@@ -162,6 +162,12 @@ export const adminSupplierSchema = z.object({
 export const adminSupplierDetailDataSchema = z.object({ supplier: adminSupplierSchema });
 export const adminSupplierActiveMutationDataSchema = z.object({ id: z.string().uuid(), active: z.boolean(), version: z.number().int() });
 
+export const adminNewsSchema = z.object({
+  id: z.string().uuid(), title: z.string(), summary: z.string(), sortOrder: z.number().int(), active: z.boolean(),
+  startsAt: nullableDateTime, endsAt: nullableDateTime, version: z.number().int(), createdAt: dateTime, updatedAt: dateTime,
+});
+export const adminNewsDetailDataSchema = z.object({ news: adminNewsSchema });
+
 export const adminCustomerSummarySchema = adminOrderCustomerSchema.extend({ ordersCount: z.number().int(), paidTotal: adminMoneySchema, loyalty: adminLoyaltyAccountSchema });
 export const adminCustomerDetailDataSchema = z.object({
   customer: adminOrderCustomerSchema.extend({

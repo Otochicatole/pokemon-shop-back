@@ -19,6 +19,7 @@ import { createSupportRouters, SupportRealtimeHub } from '../modules/support/ind
 import { createNotificationsRouters } from '../modules/notifications/index.js';
 import { PrismaUnitOfWork } from '../shared/infrastructure/prisma-unit-of-work.js';
 import { getTransferSettings, transferSettingsConfigured } from '../modules/payments/index.js';
+import { createNewsRouter } from '../modules/news/index.js';
 
 export interface CompositionRoot {
   prisma: typeof prisma;
@@ -31,6 +32,7 @@ export interface CompositionRoot {
     customerAccess: ReturnType<typeof createAuthRouter>;
     adminAccess: ReturnType<typeof createAdminAuthRouter>;
     catalog: ReturnType<typeof createCatalogV2Router>;
+    news: ReturnType<typeof createNewsRouter>;
     commerce: ReturnType<typeof createOrdersRouter>;
     loyalty: ReturnType<typeof createLoyaltyRouter>;
     support: ReturnType<typeof createSupportRouters>['userRouter'];
@@ -90,6 +92,7 @@ export function createCompositionRoot(): CompositionRoot {
       customerAccess: createAuthRouter(prisma, { onSessionRevoked }),
       adminAccess: createAdminAuthRouter(prisma, { onSessionRevoked }),
       catalog: createCatalogV2Router(new PrismaCatalogRepository(prisma)),
+      news: createNewsRouter(prisma),
       commerce: createOrdersRouter(prisma, upload, supportRealtime),
       loyalty: createLoyaltyRouter(prisma),
       support: supportRouters.userRouter,

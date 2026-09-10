@@ -2,10 +2,10 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { badRequest, conflict, notFound } from '../../../shared/errors.js';
 import { parseMinor } from '../../../shared/money.js';
 import type { PickupPointWrite, ShippingZoneWrite } from '../application/ports.js';
-import type { JsonValue, OrderDto, OrderStatusMutationDto, RefundDto, SupplierDto, TransferReviewDto } from '../application/dtos.js';
+import type { JsonValue, NewsDto, OrderDto, OrderStatusMutationDto, RefundDto, SupplierDto, TransferReviewDto } from '../application/dtos.js';
 import type {
   AdminActor, AuditListQuery, CustomerListQuery, OrderListQuery, OrderStatusValue,
-  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierWrite, LoyaltyProgramWrite, TransferSettingsWrite,
+  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierWrite, LoyaltyProgramWrite, TransferSettingsWrite, NewsListQuery, NewsPatch, NewsWrite,
 } from '../domain/admin-cms.js';
 import { allowedOrderTransitions } from '../domain/admin-cms.js';
 import { getLoyaltyProgram, mapLoyaltyProgram, releaseOrderLoyaltyReservation, reverseOrderLoyalty, settleOrderLoyalty } from '../../loyalty/index.js';
@@ -81,6 +81,29 @@ function mapSupplier(value: { id: string; name: string; contactName: string | nu
     phone: value.phone, address: value.address, notes: value.notes, active: value.active,
     version: value.version, createdAt: value.createdAt, updatedAt: value.updatedAt,
   };
+}
+
+type NewsRecord = Prisma.NewsItemGetPayload<object>;
+
+function mapNews(value: NewsRecord): NewsDto {
+  return {
+    id: value.id, title: value.title, summary: value.summary, sortOrder: value.sortOrder, active: value.active,
+    startsAt: value.startsAt, endsAt: value.endsAt, version: value.version,
+    createdAt: value.createdAt, updatedAt: value.updatedAt,
+  };
+}
+
+function validateNewsDates(startsAt: Date | null, endsAt: Date | null) {
+  if (startsAt && endsAt && startsAt >= endsAt) throw badRequest('INVALID_NEWS_WINDOW', 'La fecha de fin debe ser posterior al inicio');
+}
+
+async function scheduleFileCleanup(tx: Prisma.TransactionClient, file: { id: string; storageKey: string } | null | undefined) {
+  if (!file) return;
+  await tx.fileCleanupJob.upsert({
+    where: { fileId: file.id },
+    create: { fileId: file.id, storageKey: file.storageKey, availableAt: new Date(Date.now() + RETIRED_IMAGE_GRACE_MS) },
+    update: { storageKey: file.storageKey, status: 'PENDING', availableAt: new Date(Date.now() + RETIRED_IMAGE_GRACE_MS), claimedAt: null, completedAt: null, lastError: null },
+  });
 }
 
 const orderDetailInclude = {
@@ -367,6 +390,64 @@ export class PrismaAdminCmsTransactionStore {
     const supplier = await this.prisma.supplier.findUnique({ where: { id } });
     if (!supplier) throw notFound('Supplier not found');
     return { supplier: mapSupplier(supplier) };
+  }
+
+  async listNews(query: NewsListQuery) {
+    const where: Prisma.NewsItemWhereInput = {
+      ...(query.active === undefined ? {} : { active: query.active }),
+      ...(query.search ? { OR: [{ title: { contains: query.search } }, { summary: { contains: query.search } }] } : {}),
+    };
+    const rows = await this.prisma.newsItem.findMany({ where, orderBy: [{ sortOrder: 'asc' }, { updatedAt: 'desc' }, { id: 'asc' }], take: query.limit + 1, ...(query.cursor ? { skip: 1, cursor: { id: query.cursor } } : {}) });
+    const result = page(rows, query.limit, (value) => value.id);
+    return { data: result.data.map(mapNews), nextCursor: result.nextCursor };
+  }
+
+  async getNews(id: string) {
+    const news = await this.prisma.newsItem.findUnique({ where: { id } });
+    if (!news) throw notFound('News item not found');
+    return { news: mapNews(news) };
+  }
+
+  createNews(actor: AdminActor, input: NewsWrite) {
+    validateNewsDates(input.startsAt, input.endsAt);
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const news = await tx.newsItem.create({ data: {
+        title: input.title, summary: input.summary, sortOrder: input.sortOrder, active: false,
+        startsAt: input.startsAt, endsAt: input.endsAt,
+      } });
+      await tx.auditLog.create({ data: auditData(actor, 'NEWS_CREATED', 'NewsItem', news.id, { active: news.active, sortOrder: news.sortOrder }) });
+      return { news: mapNews(news) };
+    }));
+  }
+
+  updateNews(actor: AdminActor, id: string, input: NewsPatch) {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const existing = await tx.newsItem.findUnique({ where: { id } });
+      if (!existing) throw notFound('News item not found');
+      const startsAt = input.startsAt !== undefined ? input.startsAt : existing.startsAt;
+      const endsAt = input.endsAt !== undefined ? input.endsAt : existing.endsAt;
+      validateNewsDates(startsAt, endsAt);
+      const changed = await tx.newsItem.updateMany({ where: { id, version: input.expectedVersion }, data: {
+        ...(input.title !== undefined ? { title: input.title } : {}), ...(input.summary !== undefined ? { summary: input.summary } : {}),
+        ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}), ...(input.active !== undefined ? { active: input.active } : {}),
+        ...(input.startsAt !== undefined ? { startsAt: input.startsAt } : {}), ...(input.endsAt !== undefined ? { endsAt: input.endsAt } : {}),
+        version: { increment: 1 },
+      } });
+      if (changed.count !== 1) throw conflict('NEWS_CHANGED', 'La noticia fue modificada por otro administrador');
+      const news = await tx.newsItem.findUniqueOrThrow({ where: { id } });
+      await tx.auditLog.create({ data: auditData(actor, 'NEWS_UPDATED', 'NewsItem', id, { fromVersion: input.expectedVersion, toVersion: news.version }) });
+      return { news: mapNews(news) };
+    }));
+  }
+
+  deleteNews(actor: AdminActor, id: string, expectedVersion: number): Promise<void> {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const existing = await tx.newsItem.findUnique({ where: { id } });
+      if (!existing) throw notFound('News item not found');
+      const deleted = await tx.newsItem.deleteMany({ where: { id, version: expectedVersion } });
+      if (deleted.count !== 1) throw conflict('NEWS_CHANGED', 'La noticia fue modificada por otro administrador');
+      await tx.auditLog.create({ data: auditData(actor, 'NEWS_DELETED', 'NewsItem', id, { fromVersion: expectedVersion }) });
+    }));
   }
 
   createSupplier(actor: AdminActor, input: SupplierWrite) {

@@ -21,6 +21,7 @@ import {
   supportStatusSchema,
   updateSupportStatusSchema,
 } from '../support/index.js';
+import { publicNewsItemSchema, publicNewsQuerySchema } from '../news/index.js';
 
 extendZodWithOpenApi(z);
 const moneySchema = catalogMoneySchema;
@@ -172,6 +173,7 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
   registry.register('LoyaltyTransaction', loyaltyTransactionSchema);
   registry.register('SupportConversation', supportConversationSchema);
   registry.register('SupportMessage', supportMessageResponseSchema);
+  registry.register('NewsItem', publicNewsItemSchema);
   const envelope = (schema: z.ZodType) => z.object({ data: schema, meta: z.record(z.string(), z.unknown()).optional() });
   const adminSecurity = [{ adminCookie: [] }];
   const userSecurity = [{ userCookie: [] }];
@@ -238,6 +240,7 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
   registry.registerPath({ method: 'get', path: '/api/v2/catalog/products', tags: ['Catalog'], request: { query: catalogListQuerySchema }, responses: { 200: { description: 'Published products filtered and sorted by the server', content: { 'application/json': { schema: z.object({ data: z.array(catalogProductSchema), meta: z.object({ nextCursor: z.string().nullable() }) }) } } } } });
   registry.registerPath({ method: 'get', path: '/api/v2/catalog/filters', tags: ['Catalog'], responses: { 200: { description: 'Available catalog facets and their published-product counts', content: { 'application/json': { schema: envelope(catalogFiltersSchema) } } } } });
   registry.registerPath({ method: 'get', path: '/api/v2/catalog/products/{slug}', tags: ['Catalog'], request: { params: z.object({ slug: z.string().min(1) }) }, responses: { 200: { description: 'Published product detail', content: { 'application/json': { schema: envelope(catalogProductSchema) } } }, 404: { description: 'Product not found', content: { 'application/json': { schema: problemSchema } } } } });
+  registry.registerPath({ method: 'get', path: '/api/v2/news', tags: ['News'], summary: 'List active news items within their publication window', request: { query: publicNewsQuerySchema }, responses: { 200: { description: 'Public news carousel items', content: { 'application/json': { schema: envelope(z.array(publicNewsItemSchema)) } } }, 400: publicErrors[400] } });
   registry.registerPath({ method: 'get', path: '/api/v2/checkout/options', tags: ['Checkout'], responses: { 200: { description: 'Available fulfillment and payment methods', content: { 'application/json': { schema: envelope(checkoutOptionsSchema) } } } } });
   registry.registerPath({
     method: 'get', path: '/api/v2/loyalty/program', tags: ['Loyalty'], summary: 'Read the active points and redemption rules',

@@ -97,6 +97,25 @@ export const supplierWriteSchema = z.object({
 export const supplierPatchSchema = supplierWriteSchema.partial().extend({ expectedVersion: z.number().int().min(1) });
 export const supplierActiveSchema = activeSchema.extend({ expectedVersion: z.number().int().min(1) });
 export const supplierListQuerySchema = cursorQuery.extend({ search: optionalText(180), active: booleanQuery });
+const nullableNewsDate = z.preprocess(
+  (value) => value === '' || value === undefined ? null : value,
+  z.coerce.date().nullable(),
+);
+export const newsListQuerySchema = cursorQuery.extend({ search: optionalText(180), active: booleanQuery });
+const newsFieldsSchema = z.object({
+  title: z.string().trim().min(1).max(180),
+  summary: z.string().trim().max(500),
+  sortOrder: z.number().int().min(0).max(1_000_000),
+  active: z.boolean().default(false),
+  startsAt: nullableNewsDate,
+  endsAt: nullableNewsDate,
+});
+export const newsWriteSchema = newsFieldsSchema.superRefine((value, context) => {
+  if (value.startsAt && value.endsAt && value.startsAt >= value.endsAt) context.addIssue({ code: 'custom', path: ['endsAt'], message: 'La fecha de fin debe ser posterior al inicio' });
+});
+export const newsPatchSchema = newsFieldsSchema.partial().extend({ expectedVersion: z.number().int().min(1) }).superRefine((value, context) => {
+  if (value.startsAt && value.endsAt && value.startsAt >= value.endsAt) context.addIssue({ code: 'custom', path: ['endsAt'], message: 'La fecha de fin debe ser posterior al inicio' });
+});
 
 export const customerListQuerySchema = cursorQuery.extend({ search: optionalText(180), status: z.enum(['ACTIVE', 'SUSPENDED']).optional(), verified: booleanQuery });
 export const auditListQuerySchema = cursorQuery.extend({ actorId: z.string().uuid().optional(), action: optionalText(100), entityType: optionalText(100), requestId: optionalText(150), from: dateQuery, to: dateQuery });

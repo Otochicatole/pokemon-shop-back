@@ -8,6 +8,7 @@ import {
   productWriteSchema, refundSchema, shippingZoneWriteSchema, supplierActiveSchema, supplierListQuerySchema,
   supplierPatchSchema, supplierWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
   tcgdexCardParamsSchema, tcgdexImageImportSchema, tcgdexSearchQuerySchema,
+  newsListQuerySchema, newsWriteSchema, newsPatchSchema,
   adminActiveMutationDataSchema, adminAuditEntrySchema, adminCustomerDetailDataSchema, adminCustomerSummarySchema,
   adminDashboardDataSchema, adminEnvelopeSchema, adminFulfillmentDataSchema, adminFullRefundDataSchema,
   adminInventoryAdjustmentSchema, adminInventoryMutationDataSchema, adminLoyaltyProgramSchema, adminOrderDetailDataSchema, adminOrderSchema,
@@ -15,7 +16,7 @@ import {
   adminProductImagesDataSchema, adminProductImageUpdateDataSchema, adminProductSchema, adminProductStatusDataSchema,
   adminShippingZoneResultDataSchema, adminTransferReviewDataSchema,
   adminSupplierActiveMutationDataSchema, adminSupplierDetailDataSchema, adminSupplierSchema, adminTcgdexCardDataSchema, adminTransferSettingsSchema,
-  adminTcgdexCardSummarySchema,
+  adminTcgdexCardSummarySchema, adminNewsSchema, adminNewsDetailDataSchema,
 } from '../backoffice/index.js';
 
 type Options = { problemSchema: z.ZodType; moneySchema: z.ZodType };
@@ -46,6 +47,9 @@ export function registerAdminCmsPaths(registry: OpenAPIRegistry, { problemSchema
   registry.register('AdminLoyaltyProgramWrite', loyaltyProgramWriteSchema);
   registry.register('AdminLoyaltyProgram', adminLoyaltyProgramSchema);
   registry.register('AdminTransferSettings', adminTransferSettingsSchema);
+  registry.register('AdminNews', adminNewsSchema);
+  registry.register('AdminNewsWrite', newsWriteSchema);
+  registry.register('AdminNewsPatch', newsPatchSchema);
 
   registry.registerPath({ method: 'get', path: '/api/v2/admin/dashboard', tags: ['Admin dashboard'], summary: 'Read operational and commercial metrics', security, request: { query: dashboardQuerySchema }, responses: ok('Dashboard for the selected date range', adminDashboardDataSchema) });
   registry.registerPath({ method: 'get', path: '/api/v2/admin/loyalty/config', tags: ['Admin loyalty'], summary: 'Read the configurable earning and redemption rules', security, responses: ok('Current loyalty program configuration', adminLoyaltyProgramSchema) });
@@ -82,6 +86,12 @@ export function registerAdminCmsPaths(registry: OpenAPIRegistry, { problemSchema
   registry.registerPath({ method: 'post', path: '/api/v2/admin/suppliers', tags: ['Admin suppliers'], summary: 'Create an active supplier', security, request: { headers: csrf, body: json(supplierWriteSchema) }, responses: created('Supplier created', adminSupplierDetailDataSchema) });
   registry.registerPath({ method: 'patch', path: '/api/v2/admin/suppliers/{id}', tags: ['Admin suppliers'], summary: 'Edit a supplier using optimistic concurrency', security, request: { params: idParamsSchema, headers: csrf, body: json(supplierPatchSchema) }, responses: ok('Supplier updated', adminSupplierDetailDataSchema) });
   registry.registerPath({ method: 'patch', path: '/api/v2/admin/suppliers/{id}/active', tags: ['Admin suppliers'], summary: 'Activate or deactivate a supplier without deleting history', security, request: { params: idParamsSchema, headers: csrf, body: json(supplierActiveSchema) }, responses: ok('Supplier availability changed', adminSupplierActiveMutationDataSchema) });
+
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/news', tags: ['Admin news'], summary: 'List all news items and publication states', security, request: { query: newsListQuerySchema }, responses: ok('Cursor page of news items', z.array(adminNewsSchema)) });
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/news/{id}', tags: ['Admin news'], summary: 'Read an administrative news item', security, request: { params: idParamsSchema }, responses: ok('News item detail', adminNewsDetailDataSchema) });
+  registry.registerPath({ method: 'post', path: '/api/v2/admin/news', tags: ['Admin news'], summary: 'Create an inactive news item', security, request: { headers: csrf, body: json(newsWriteSchema) }, responses: created('News item created', adminNewsDetailDataSchema) });
+  registry.registerPath({ method: 'patch', path: '/api/v2/admin/news/{id}', tags: ['Admin news'], summary: 'Edit a news item using optimistic concurrency', security, request: { params: idParamsSchema, headers: csrf, body: json(newsPatchSchema) }, responses: ok('News item updated', adminNewsDetailDataSchema) });
+  registry.registerPath({ method: 'delete', path: '/api/v2/admin/news/{id}', tags: ['Admin news'], summary: 'Permanently delete a news item', security, request: { params: idParamsSchema, headers: csrf, body: json(expectedVersionSchema) }, responses: { 204: { description: 'News item deleted' }, ...errors } });
 
   registry.registerPath({ method: 'get', path: '/api/v2/admin/orders', tags: ['Admin orders'], summary: 'List and filter orders', security, request: { query: orderListQuerySchema }, responses: ok('Cursor page of orders', z.array(adminOrderSchema)) });
   registry.registerPath({ method: 'get', path: '/api/v2/admin/orders/{number}', tags: ['Admin orders'], summary: 'Read immutable snapshots, timeline and allowed actions', security, request: { params: orderParamsSchema }, responses: ok('Administrative order detail', adminOrderDetailDataSchema) });
