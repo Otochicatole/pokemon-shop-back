@@ -106,6 +106,7 @@ const orderLoyaltySchema = z.object({
   spendPerPoint: moneySchema.nullable(),
   pointValue: moneySchema.nullable(),
 });
+const orderTimelineEventSchema = z.object({ id: z.string().uuid(), fromStatus: orderStatusSchema.nullable(), toStatus: orderStatusSchema, createdAt: dateTimeSchema });
 const publicOrderSchema = z.object({
   id: z.string().uuid(),
   number: z.string(),
@@ -115,6 +116,7 @@ const publicOrderSchema = z.object({
   fulfillmentType: z.enum(['SHIPMENT', 'PICKUP']),
   totals: z.object({ subtotal: moneySchema, discount: moneySchema, shipping: moneySchema, total: moneySchema }),
   loyalty: orderLoyaltySchema,
+  timeline: z.array(orderTimelineEventSchema),
   expiresAt: dateTimeSchema.nullable(),
   items: z.array(z.object({
     productId: z.string().uuid(), sku: z.string(), name: z.string(), imageFileId: z.string().uuid().nullable(), imageUrl: z.string().nullable(),

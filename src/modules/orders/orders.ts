@@ -54,6 +54,7 @@ function mapOrder(order: any) {
     },
     expiresAt: order.expiresAt,
     items: order.items?.map((item: any) => ({ productId: item.productId, sku: item.sku, name: item.productName, imageFileId: item.imageFileId ?? null, imageUrl: item.imageFileId ? `/media/public/${item.imageFileId}` : null, quantity: item.quantity, unitPrice: moneyDto({ amountMinor: item.unitPriceMinor, currency: BASE_CURRENCY }), lineTotal: moneyDto({ amountMinor: item.lineTotalMinor, currency: BASE_CURRENCY }) })),
+    timeline: Array.isArray(order.statusHistory) ? order.statusHistory.map((event: any) => ({ id: event.id, fromStatus: event.fromStatus ?? null, toStatus: event.toStatus, createdAt: event.createdAt })) : [],
     fulfillment: order.fulfillmentType === 'SHIPMENT' ? { type: 'SHIPMENT', recipientName: order.recipientName, recipientPhone: order.recipientPhone, addressLine1: order.addressLine1, addressLine2: order.addressLine2, city: order.city, province: order.province, postalCode: order.postalCode, shippingRateId: order.shippingRateId, shippingZoneName: order.shippingZoneName ?? null, shippingRateName: order.shippingRateName ?? null, shippingRatePrice: order.shippingRatePriceMinor === null || order.shippingRatePriceMinor === undefined ? null : moneyDto({ amountMinor: order.shippingRatePriceMinor, currency: BASE_CURRENCY }) } : { type: 'PICKUP', pickupPointId: order.pickupPointId, pickupPointName: order.pickupPointName ?? null, pickupPointAddress: order.pickupPointAddress ?? null },
     payment: order.payment ? { method: order.payment.method, status: order.payment.status, bankReference: order.payment.transfer?.reference ?? null, bankInstructions: order.payment.method === 'BANK_TRANSFER' && bankConfigured ? { bankName: env.BANK_NAME, accountHolder: env.BANK_ACCOUNT_HOLDER, cbu: env.BANK_CBU ?? null, alias: env.BANK_ALIAS ?? null } : null, receipt: order.transferReceipts?.[0] ? { fileId: order.transferReceipts[0].fileId, review: order.transferReceipts[0].review, createdAt: order.transferReceipts[0].createdAt } : null, checkoutUrl: order.payment.mercadoPago?.checkoutUrl ?? null, paymentSessionStatus: order.payment.mercadoPago && !order.payment.mercadoPago.checkoutUrl ? 'RETRY_REQUIRED' : 'READY' } : null,
     createdAt: order.createdAt,
@@ -268,7 +269,7 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
 
   router.get('/orders/:number', requireUser, async (req, res) => {
     const user = currentUser(req)!.user;
-    const order = await prisma.order.findFirst({ where: { number: String(req.params.number), userId: user.id }, include: { items: true, transferReceipts: { orderBy: { createdAt: 'desc' }, take: 1 }, payment: { include: { transfer: true, mercadoPago: true } } } });
+    const order = await prisma.order.findFirst({ where: { number: String(req.params.number), userId: user.id }, include: { items: true, statusHistory: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }, transferReceipts: { orderBy: { createdAt: 'desc' }, take: 1 }, payment: { include: { transfer: true, mercadoPago: true } } } });
     if (!order) throw notFound('Order not found');
     return res.json({ order: mapOrder(order) });
   });

@@ -94,11 +94,28 @@ function actionsFor(order: OrderRecord) {
   const actions: string[] = [];
   const next = allowedOrderTransitions[order.status];
   if (next.length) actions.push(...next.map((status) => `TRANSITION_${status}`));
+  if (rollbackTarget(order)) actions.push('ROLLBACK');
   if (['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(order.status)) actions.push('CANCEL');
   if (order.paymentMethod === 'BANK_TRANSFER' && ['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(order.status) && order.transferReceipts.some((receipt) => receipt.review === 'PENDING')) actions.push('REVIEW_TRANSFER');
   if (order.status === 'PAYMENT_REQUIRES_REVIEW' && order.payment?.status === 'APPROVED') actions.push('FULFILL_LATE_PAYMENT');
   if (order.payment && ['APPROVED', 'REQUIRES_REVIEW'].includes(order.payment.status) && !order.payment.refunds.length) actions.push('RECORD_FULL_REFUND');
   return actions;
+}
+
+const rollbackableStatuses = new Set<OrderStatusValue>(['PREPARING', 'READY_FOR_PICKUP', 'SHIPPED', 'COMPLETED']);
+const rollbackTargets = new Set<OrderStatusValue>(['PAID', 'PREPARING', 'READY_FOR_PICKUP', 'SHIPPED']);
+
+function rollbackTarget(order: Pick<OrderRecord, 'status' | 'statusHistory'>): OrderStatusValue | null {
+  if (!rollbackableStatuses.has(order.status)) return null;
+  let currentEventIndex = -1;
+  for (let index = order.statusHistory.length - 1; index >= 0; index -= 1) {
+    if (order.statusHistory[index]?.toStatus === order.status) {
+      currentEventIndex = index;
+      break;
+    }
+  }
+  const previous = currentEventIndex > 0 ? order.statusHistory[currentEventIndex - 1]?.toStatus as OrderStatusValue | undefined : undefined;
+  return previous && rollbackTargets.has(previous) ? previous : null;
 }
 
 function mapOrder(value: OrderRecord): OrderDto {
@@ -446,14 +463,15 @@ export class PrismaAdminCmsTransactionStore {
 
   transitionOrder(actor: AdminActor, number: string, expectedVersion: number, status: OrderStatusValue, note?: string) {
     return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
-      const order = await tx.order.findUnique({ where: { number } });
+      const order = await tx.order.findUnique({ where: { number }, include: { statusHistory: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] } } });
       if (!order) throw notFound('Order not found');
-      if (!allowedOrderTransitions[order.status].includes(status)) throw conflict('INVALID_ORDER_TRANSITION', `Order cannot transition from ${order.status} to ${status}`);
+      const isRollback = rollbackTarget(order) === status;
+      if (!allowedOrderTransitions[order.status].includes(status) && !isRollback) throw conflict('INVALID_ORDER_TRANSITION', `Order cannot transition from ${order.status} to ${status}`);
       if (status === 'READY_FOR_PICKUP' && order.fulfillmentType !== 'PICKUP') throw conflict('INVALID_FULFILLMENT_TRANSITION', 'Only pickup orders can become ready for pickup');
       if (status === 'SHIPPED' && order.fulfillmentType !== 'SHIPMENT') throw conflict('INVALID_FULFILLMENT_TRANSITION', 'Only shipment orders can be shipped');
       await updateOrderVersion(tx, order.id, expectedVersion, { status });
-      await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: status, note, changedById: actor.adminId } });
-      await tx.auditLog.create({ data: auditData(actor, 'ORDER_STATUS_CHANGED', 'Order', order.id, { number, fromStatus: order.status, toStatus: status }) });
+      await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: status, note: note ?? (isRollback ? `Manual rollback to ${status}` : undefined), changedById: actor.adminId } });
+      await tx.auditLog.create({ data: auditData(actor, isRollback ? 'ORDER_STATUS_ROLLED_BACK' : 'ORDER_STATUS_CHANGED', 'Order', order.id, { number, fromStatus: order.status, toStatus: status }) });
       return { number, status, version: expectedVersion + 1 };
     }));
   }
