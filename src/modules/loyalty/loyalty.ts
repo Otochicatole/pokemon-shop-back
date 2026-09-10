@@ -98,7 +98,10 @@ export async function calculateLoyaltyQuote(
     throw badRequest('LOYALTY_MINIMUM_NOT_MET', `El canje mínimo es de ${program.minimumRedemptionPoints} puntos`, { minimumRedemptionPoints: program.minimumRedemptionPoints });
   }
   if (requestedPoints > maximumRedeemablePoints) {
-    throw conflict('LOYALTY_POINTS_UNAVAILABLE', 'No hay suficientes puntos disponibles para este descuento', { availablePoints: available, maximumRedeemablePoints });
+    const message = maximumRedeemablePoints < available
+      ? `Podés usar hasta ${maximumRedeemablePoints} puntos en esta compra por el límite del ${program.maximumRedemptionPercent}% sobre los productos`
+      : `No tenés suficientes puntos disponibles para este descuento (disponibles: ${available})`;
+    throw conflict('LOYALTY_POINTS_UNAVAILABLE', message, { availablePoints: available, maximumRedeemablePoints });
   }
 
   const discountMinor = BigInt(requestedPoints) * program.pointValueMinor;
