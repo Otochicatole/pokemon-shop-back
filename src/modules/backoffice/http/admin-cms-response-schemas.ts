@@ -53,7 +53,7 @@ export const adminProductImagesDataSchema = z.object({ version: z.number().int()
 export const adminProductImageUpdateDataSchema = z.object({ id: z.string().uuid(), altText: z.string().nullable(), version: z.number().int() });
 export const adminProductImageOrderDataSchema = z.object({ imageIds: z.array(z.string().uuid()), version: z.number().int() });
 
-export const adminTcgdexCardSummarySchema = z.object({ id: z.string(), name: z.string(), localId: z.string(), setCode: z.string(), imageUrl: z.string().url().nullable() });
+export const adminTcgdexCardSummarySchema = z.object({ id: z.string(), name: z.string(), localId: z.string(), setCode: z.string(), imageUrl: z.string().url().nullable(), setName: z.string().optional(), rarity: z.string().optional(), category: z.string().optional(), types: z.array(z.string()).optional(), firstEdition: z.boolean().optional(), holo: z.boolean().optional() });
 export const adminTcgdexCardSchema = adminTcgdexCardSummarySchema.extend({ setName: z.string(), description: z.string(), rarity: z.string(), category: z.string(), types: z.array(z.string()), firstEdition: z.boolean(), holo: z.boolean(), effect: z.string(), language: z.literal('Español') });
 export const adminTcgdexCardDataSchema = z.object({ card: adminTcgdexCardSchema });
 

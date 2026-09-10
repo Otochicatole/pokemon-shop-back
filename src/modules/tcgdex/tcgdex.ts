@@ -11,6 +11,12 @@ export type TcgDexCardSummary = {
   localId: string;
   setCode: string;
   imageUrl: string | null;
+  setName?: string;
+  rarity?: string;
+  category?: string;
+  types?: string[];
+  firstEdition?: boolean;
+  holo?: boolean;
 };
 
 export type TcgDexCardDetails = TcgDexCardSummary & {
@@ -50,11 +56,34 @@ export async function searchCards(input: string): Promise<TcgDexCardSummary[]> {
   try {
     const results = await client.card.list(Query.create().contains('name', query).paginate(1, 20));
     const seen = new Set<string>();
-    return results.map(summary).filter((card) => {
+    const cards = results.map(summary).filter((card) => {
       if (seen.has(card.id)) return false;
       seen.add(card.id);
       return true;
     });
+    const enriched: TcgDexCardSummary[] = [];
+    for (let index = 0; index < cards.length; index += 5) {
+      const batch = await Promise.all(cards.slice(index, index + 5).map(async (card) => {
+        try {
+          const detail = await client.card.get(card.id);
+          if (!detail) return card;
+          const value = detail as CardModel;
+          return {
+            ...card,
+            setName: value.set.name,
+            rarity: value.rarity ?? '',
+            category: value.category ?? '',
+            types: value.types ?? [],
+            firstEdition: Boolean(value.variants?.firstEdition),
+            holo: Boolean(value.variants?.holo),
+          } satisfies TcgDexCardSummary;
+        } catch {
+          return card;
+        }
+      }));
+      enriched.push(...batch);
+    }
+    return enriched;
   } catch (error) {
     throw unavailable(error);
   }
