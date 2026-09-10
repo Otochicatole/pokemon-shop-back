@@ -26,6 +26,7 @@
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "9.1.0",
     "@prisma/client": "6.19.3",
+    "@tcgdex/sdk": "^2.9.0",
     "argon2": "0.45.1",
     "cookie-parser": "1.4.7",
     "cors": "2.8.5",

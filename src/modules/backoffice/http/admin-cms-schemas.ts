@@ -16,6 +16,8 @@ const dateQuery = z.preprocess(emptyToUndefined, z.coerce.date().optional());
 
 export const idParamsSchema = z.object({ id: z.string().uuid() });
 export const productImageParamsSchema = z.object({ id: z.string().uuid(), imageId: z.string().uuid() });
+export const tcgdexCardParamsSchema = z.object({ id: z.string().trim().min(2).max(120).regex(/^[A-Za-z0-9._-]+$/) });
+export const tcgdexSearchQuerySchema = z.object({ q: z.string().trim().min(2).max(80) });
 export const orderParamsSchema = z.object({ number: z.string().trim().min(5).max(40) });
 export const transferReceiptParamsSchema = orderParamsSchema.extend({ receiptId: z.string().uuid() });
 
@@ -34,6 +36,7 @@ export const productWriteSchema = z.object({
 });
 export const productPatchSchema = productWriteSchema.omit({ initialStock: true, stock: true }).partial().extend({ expectedVersion: z.number().int().min(1) });
 export const expectedVersionSchema = z.object({ expectedVersion: z.number().int().min(1) });
+export const tcgdexImageImportSchema = expectedVersionSchema.extend({ imageUrl: z.string().url().max(500) });
 export const productListQuerySchema = cursorQuery.extend({
   search: optionalText(180), status: z.enum(productStatuses).optional(), kind: z.enum(productKinds).optional(),
   stock: z.enum(['AVAILABLE', 'LOW', 'OUT']).optional(), pokemonType: z.enum(pokemonTypes).optional(), setName: optionalText(120),

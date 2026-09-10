@@ -1,6 +1,7 @@
 import { Router, type Request, type RequestHandler } from 'express';
 import type multer from 'multer';
-import { badRequest } from '../../../shared/errors.js';
+import { Readable } from 'node:stream';
+import { AppError, badRequest } from '../../../shared/errors.js';
 import type { AdminCmsApplication } from '../application/admin-cms-application.js';
 import type { AdminActor } from '../domain/admin-cms.js';
 import {
@@ -10,10 +11,35 @@ import {
   pickupPointWriteSchema, productImageParamsSchema, productListQuerySchema, productPatchSchema,
   productWriteSchema, refundSchema, shippingZoneWriteSchema, supplierActiveSchema, supplierListQuerySchema,
   supplierPatchSchema, supplierWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
-  loyaltyProgramWriteSchema,
+  loyaltyProgramWriteSchema, tcgdexCardParamsSchema, tcgdexImageImportSchema, tcgdexSearchQuerySchema,
 } from './admin-cms-schemas.js';
+import { getCard, searchCards } from '../../tcgdex/index.js';
 
 const noContent = (response: import('express').Response) => response.status(204).send();
+const tcgdexImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+function tcgdexImageUrl(value: string) {
+  let parsed: URL;
+  try { parsed = new URL(value); } catch { throw badRequest('TCGDEX_IMAGE_URL_INVALID', 'La imagen de TCGdex no es válida'); }
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'assets.tcgdex.net') throw badRequest('TCGDEX_IMAGE_URL_INVALID', 'Solo se admiten imágenes oficiales de TCGdex');
+  return parsed.toString();
+}
+
+async function downloadTcgdexImage(value: string): Promise<Express.Multer.File> {
+  const url = tcgdexImageUrl(value);
+  let response: Response;
+  try { response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(15_000) }); } catch { throw new AppError(502, 'TCGDEX_IMAGE_UNAVAILABLE', 'No se pudo descargar la imagen de TCGdex'); }
+  if (!response.ok) throw new AppError(502, 'TCGDEX_IMAGE_UNAVAILABLE', 'No se pudo descargar la imagen de TCGdex');
+  const contentType = (response.headers.get('content-type') ?? '').split(';').at(0)?.trim() ?? '';
+  const contentLength = Number(response.headers.get('content-length') ?? 0);
+  if (!tcgdexImageTypes.has(contentType) || contentLength > 10 * 1024 * 1024) throw badRequest('TCGDEX_IMAGE_INVALID', 'La imagen de TCGdex no tiene un formato admitido');
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.byteLength > 10 * 1024 * 1024) throw badRequest('TCGDEX_IMAGE_TOO_LARGE', 'La imagen de TCGdex supera el límite permitido');
+  return {
+    fieldname: 'image', originalname: 'tcgdex-card.webp', encoding: '7bit', mimetype: contentType,
+    destination: '', filename: 'tcgdex-card.webp', path: '', size: buffer.byteLength, buffer, stream: Readable.from(buffer),
+  };
+}
 
 export type AdminCmsHttpDependencies = {
   application: AdminCmsApplication;
@@ -34,6 +60,15 @@ export function createAdminCmsRouter({ application, upload, requireAdmin, actorF
 
   router.get('/loyalty/config', async (_req, res) => res.json(await application.loyalty.get()));
   router.patch('/loyalty/config', async (req, res) => res.json(await application.loyalty.update(actorFromRequest(req), loyaltyProgramWriteSchema.parse(req.body))));
+
+  router.get('/tcgdex/cards', async (req, res) => {
+    const query = tcgdexSearchQuerySchema.parse(req.query);
+    return res.json({ data: await searchCards(query.q), meta: {} });
+  });
+  router.get('/tcgdex/cards/:id', async (req, res) => {
+    const params = tcgdexCardParamsSchema.parse(req.params);
+    return res.json({ data: { card: await getCard(params.id) }, meta: {} });
+  });
 
   router.get('/products', async (req, res) => res.json(await application.products.list(productListQuerySchema.parse(req.query))));
   router.post('/products', async (req, res) => {
@@ -61,6 +96,18 @@ export function createAdminCmsRouter({ application, upload, requireAdmin, actorF
       return res.status(201).json(await application.products.addImages(actorFromRequest(req), productId, fields.expectedVersion, stored));
     } catch (error) {
       await Promise.all(stored.map((file) => media.discardUnattachedFile(file.id).catch(() => false)));
+      throw error;
+    }
+  });
+  router.post('/products/:id/tcgdex-image', async (req, res) => {
+    const productId = idParamsSchema.parse(req.params).id;
+    const input = tcgdexImageImportSchema.parse(req.body);
+    const file = await downloadTcgdexImage(input.imageUrl);
+    const stored = await media.saveProductImage(file);
+    try {
+      return res.status(201).json(await application.products.addImages(actorFromRequest(req), productId, input.expectedVersion, [{ id: stored.id, altText: 'Imagen oficial de TCGdex' }]));
+    } catch (error) {
+      await media.discardUnattachedFile(stored.id).catch(() => false);
       throw error;
     }
   });
