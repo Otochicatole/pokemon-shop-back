@@ -18,6 +18,7 @@ import { createLoyaltyRouter } from '../modules/loyalty/index.js';
 import { createSupportRouters, SupportRealtimeHub } from '../modules/support/index.js';
 import { createNotificationsRouters } from '../modules/notifications/index.js';
 import { PrismaUnitOfWork } from '../shared/infrastructure/prisma-unit-of-work.js';
+import { getTransferSettings, transferSettingsConfigured } from '../modules/payments/index.js';
 
 export interface CompositionRoot {
   prisma: typeof prisma;
@@ -50,11 +51,11 @@ export function createCompositionRoot(): CompositionRoot {
   const supportRealtime = new SupportRealtimeHub();
   const backofficeRepositories = createPrismaAdminCmsRepositories(prisma, writeCoordinator, supportRealtime);
   const backofficeApplication = createAdminCmsApplication(backofficeRepositories, {
-    integrations: {
-      bankTransfer: Boolean(env.BANK_NAME && env.BANK_ACCOUNT_HOLDER && (env.BANK_CBU || env.BANK_ALIAS)),
+    integrations: async () => ({
+      bankTransfer: transferSettingsConfigured(await getTransferSettings(prisma)),
       mercadoPago: Boolean(env.MERCADOPAGO_ACCESS_TOKEN),
       smtp: Boolean(env.SMTP_HOST),
-    },
+    }),
   });
   const retiredImageCleanup = createRetiredImageCleanup(prisma, writeCoordinator, env.STORAGE_ROOT);
   const supportRouters = createSupportRouters(prisma, writeCoordinator, supportRealtime);

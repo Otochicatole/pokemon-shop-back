@@ -10,6 +10,7 @@ import { PaymentAdminRepositoryAdapter } from './repositories/payment-admin-repo
 import { ProductAdminRepositoryAdapter } from './repositories/product-admin-repository.js';
 import { SupplierAdminRepositoryAdapter } from './repositories/supplier-admin-repository.js';
 import { LoyaltyAdminRepositoryAdapter } from './repositories/loyalty-admin-repository.js';
+import { TransferSettingsAdminRepositoryAdapter } from './repositories/transfer-settings-admin-repository.js';
 import type { SupportRealtimeHub } from '../../support/support-realtime.js';
 
 export type WriteCoordinator = { run<T>(operation: () => Promise<T>): Promise<T> };
@@ -32,5 +33,6 @@ export function createPrismaAdminCmsRepositories(prisma: PrismaClient, coordinat
     audit: new AuditAdminRepositoryAdapter(store),
     suppliers: new SupplierAdminRepositoryAdapter(store),
     loyalty: new LoyaltyAdminRepositoryAdapter(store),
+    transferSettings: new TransferSettingsAdminRepositoryAdapter(store),
   };
 }

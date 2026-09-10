@@ -16,6 +16,7 @@ import { logger } from '../../infrastructure/logger.js';
 import { calculateLoyaltyQuote, releaseOrderLoyaltyReservation, reserveLoyaltyPoints, reverseOrderLoyalty, settleOrderLoyalty } from '../loyalty/index.js';
 import { createOrderCreatedNotifications, createOrderStatusNotification, createPaymentApprovedNotifications, createPaymentReviewNotifications, createReceiptSubmittedNotifications, publishNotifications } from '../notifications/index.js';
 import type { SupportRealtimeHub } from '../support/support-realtime.js';
+import { getTransferSettings, mapTransferInstructions, transferSettingsConfigured, type TransferSettingsRecord } from '../payments/index.js';
 
 const itemSchema = z.object({ productId: z.string().uuid(), quantity: z.number().int().min(1).max(100), productVersion: z.number().int().min(1) });
 const fulfillmentSchema = z.discriminatedUnion('type', [
@@ -35,8 +36,8 @@ function canonical(input: CheckoutInput) {
   return JSON.stringify({ ...input, items: [...input.items].sort((a, b) => a.productId.localeCompare(b.productId)) });
 }
 
-function mapOrder(order: any) {
-  const bankConfigured = Boolean(env.BANK_NAME && env.BANK_ACCOUNT_HOLDER && (env.BANK_CBU || env.BANK_ALIAS));
+function mapOrder(order: any, transferSettings: TransferSettingsRecord) {
+  const bankConfigured = transferSettingsConfigured(transferSettings);
   return {
     id: order.id,
     number: order.number,
@@ -58,7 +59,7 @@ function mapOrder(order: any) {
     items: order.items?.map((item: any) => ({ productId: item.productId, sku: item.sku, name: item.productName, imageFileId: item.imageFileId ?? null, imageUrl: item.imageFileId ? `/media/public/${item.imageFileId}` : null, quantity: item.quantity, unitPrice: moneyDto({ amountMinor: item.unitPriceMinor, currency: BASE_CURRENCY }), lineTotal: moneyDto({ amountMinor: item.lineTotalMinor, currency: BASE_CURRENCY }) })),
     timeline: Array.isArray(order.statusHistory) ? order.statusHistory.map((event: any) => ({ id: event.id, fromStatus: event.fromStatus ?? null, toStatus: event.toStatus, createdAt: event.createdAt })) : [],
     fulfillment: order.fulfillmentType === 'SHIPMENT' ? { type: 'SHIPMENT', recipientName: order.recipientName, recipientPhone: order.recipientPhone, addressLine1: order.addressLine1, addressLine2: order.addressLine2, city: order.city, province: order.province, postalCode: order.postalCode, shippingRateId: order.shippingRateId, shippingZoneName: order.shippingZoneName ?? null, shippingRateName: order.shippingRateName ?? null, shippingRatePrice: order.shippingRatePriceMinor === null || order.shippingRatePriceMinor === undefined ? null : moneyDto({ amountMinor: order.shippingRatePriceMinor, currency: BASE_CURRENCY }) } : { type: 'PICKUP', pickupPointId: order.pickupPointId, pickupPointName: order.pickupPointName ?? null, pickupPointAddress: order.pickupPointAddress ?? null },
-    payment: order.payment ? { method: order.payment.method, status: order.payment.status, bankReference: order.payment.transfer?.reference ?? null, bankInstructions: order.payment.method === 'BANK_TRANSFER' && bankConfigured ? { bankName: env.BANK_NAME, accountHolder: env.BANK_ACCOUNT_HOLDER, cbu: env.BANK_CBU ?? null, alias: env.BANK_ALIAS ?? null } : null, receipt: order.transferReceipts?.[0] ? { fileId: order.transferReceipts[0].fileId, review: order.transferReceipts[0].review, createdAt: order.transferReceipts[0].createdAt } : null, checkoutUrl: order.payment.mercadoPago?.checkoutUrl ?? null, paymentSessionStatus: order.payment.mercadoPago && !order.payment.mercadoPago.checkoutUrl ? 'RETRY_REQUIRED' : 'READY' } : null,
+    payment: order.payment ? { method: order.payment.method, status: order.payment.status, bankReference: order.payment.transfer?.reference ?? null, bankInstructions: order.payment.method === 'BANK_TRANSFER' && bankConfigured ? mapTransferInstructions(transferSettings) : null, receipt: order.transferReceipts?.[0] ? { fileId: order.transferReceipts[0].fileId, review: order.transferReceipts[0].review, createdAt: order.transferReceipts[0].createdAt } : null, checkoutUrl: order.payment.mercadoPago?.checkoutUrl ?? null, paymentSessionStatus: order.payment.mercadoPago && !order.payment.mercadoPago.checkoutUrl ? 'RETRY_REQUIRED' : 'READY' } : null,
     createdAt: order.createdAt,
   };
 }
@@ -190,14 +191,15 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?:
       prisma.shippingZone.findMany({ where: { active: true }, include: { provinces: true, rates: { where: { active: true }, orderBy: { priceMinor: 'asc' } } }, orderBy: { name: 'asc' } }),
       prisma.pickupPoint.findMany({ where: { active: true }, orderBy: { name: 'asc' } }),
     ]);
-    const bankConfigured = Boolean(env.BANK_NAME && env.BANK_ACCOUNT_HOLDER && (env.BANK_CBU || env.BANK_ALIAS));
-    return res.json({ fulfillment: { shippingZones: zones.map((zone) => ({ id: zone.id, name: zone.name, provinces: zone.provinces.map((province) => province.province), rates: zone.rates.map((rate) => ({ id: rate.id, name: rate.name, price: moneyDto({ amountMinor: rate.priceMinor, currency: BASE_CURRENCY }) })) })), pickupPoints: pickupPoints.map((point) => ({ id: point.id, name: point.name, address: point.address })) }, paymentMethods: { BANK_TRANSFER: env.NODE_ENV !== 'production' || bankConfigured, MERCADO_PAGO: Boolean(env.MERCADOPAGO_ACCESS_TOKEN) } });
+    const transferSettings = await getTransferSettings(prisma);
+    return res.json({ fulfillment: { shippingZones: zones.map((zone) => ({ id: zone.id, name: zone.name, provinces: zone.provinces.map((province) => province.province), rates: zone.rates.map((rate) => ({ id: rate.id, name: rate.name, price: moneyDto({ amountMinor: rate.priceMinor, currency: BASE_CURRENCY }) })) })), pickupPoints: pickupPoints.map((point) => ({ id: point.id, name: point.name, address: point.address })) }, paymentMethods: { BANK_TRANSFER: transferSettingsConfigured(transferSettings), MERCADO_PAGO: Boolean(env.MERCADOPAGO_ACCESS_TOKEN) } });
   });
   router.post('/checkout/preview', requireUser, async (req, res) => {
     const user = currentUser(req)!.user;
     if (!user.emailVerifiedAt) throw forbidden('Verify your email before checkout');
     const input = checkoutSchema.parse(req.body);
-    if (env.NODE_ENV === 'production' && input.paymentMethod === 'BANK_TRANSFER' && !(env.BANK_NAME && env.BANK_ACCOUNT_HOLDER && (env.BANK_CBU || env.BANK_ALIAS))) throw new AppError(503, 'PAYMENT_METHOD_NOT_CONFIGURED', 'Bank transfer is not configured');
+    const transferSettings = await getTransferSettings(prisma);
+    if (input.paymentMethod === 'BANK_TRANSFER' && !transferSettingsConfigured(transferSettings)) throw new AppError(503, 'PAYMENT_METHOD_NOT_CONFIGURED', 'Bank transfer is not configured');
     if (input.paymentMethod === 'MERCADO_PAGO' && !env.MERCADOPAGO_ACCESS_TOKEN) throw new AppError(503, 'PAYMENT_METHOD_NOT_CONFIGURED', 'Mercado Pago is not configured');
     const quote = await calculateCheckout(prisma, input, user.id);
     return res.json({
@@ -224,17 +226,20 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?:
     const user = currentUser(req)!.user;
     if (!user.emailVerifiedAt) throw forbidden('Verify your email before checkout');
     const input = checkoutSchema.parse(req.body);
-    if (env.NODE_ENV === 'production' && input.paymentMethod === 'BANK_TRANSFER' && !(env.BANK_NAME && env.BANK_ACCOUNT_HOLDER && (env.BANK_CBU || env.BANK_ALIAS))) throw new AppError(503, 'PAYMENT_METHOD_NOT_CONFIGURED', 'Bank transfer is not configured');
+    const transferSettings = await getTransferSettings(prisma);
+    if (input.paymentMethod === 'BANK_TRANSFER' && !transferSettingsConfigured(transferSettings)) throw new AppError(503, 'PAYMENT_METHOD_NOT_CONFIGURED', 'Bank transfer is not configured');
     if (input.paymentMethod === 'MERCADO_PAGO' && !env.MERCADOPAGO_ACCESS_TOKEN) throw new AppError(503, 'PAYMENT_METHOD_NOT_CONFIGURED', 'Mercado Pago is not configured');
     const key = req.get('idempotency-key');
     if (!key || !/^[A-Za-z0-9._:-]{16,120}$/.test(key)) throw badRequest('IDEMPOTENCY_KEY_REQUIRED', 'A valid Idempotency-Key header is required');
     const hash = sha256(canonical(input));
     const result = await writeCoordinator.run(async () => prisma.$transaction(async (tx) => {
+      const currentTransferSettings = await getTransferSettings(tx);
       const previous = await tx.order.findUnique({ where: { userId_idempotencyKey: { userId: user.id, idempotencyKey: key } }, include: { items: true, payment: { include: { transfer: true, mercadoPago: true } } } });
       if (previous) {
         if (previous.idempotencyHash !== hash) throw conflict('IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used with a different request');
-        return { order: previous, reused: true, notificationIds: [] as string[] };
+        return { order: previous, reused: true, notificationIds: [] as string[], transferSettings: currentTransferSettings };
       }
+      if (input.paymentMethod === 'BANK_TRANSFER' && !transferSettingsConfigured(currentTransferSettings)) throw new AppError(503, 'PAYMENT_METHOD_NOT_CONFIGURED', 'Bank transfer is not configured');
       const quote = await calculateCheckout(tx, input, user.id);
       const expiresAt = new Date(Date.now() + (input.paymentMethod === 'BANK_TRANSFER' ? 24 * 60 * 60 * 1000 : 30 * 60 * 1000));
       const order = await tx.order.create({ data: {
@@ -260,7 +265,7 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?:
         await tx.inventoryReservation.create({ data: { orderId: order.id, productId: product.id, quantity: item.quantity, expiresAt } });
       }
       const adminNotifications = await createOrderCreatedNotifications(tx, order);
-      return { order, reused: false, notificationIds: adminNotifications.map((row) => row.id) };
+      return { order, reused: false, notificationIds: adminNotifications.map((row) => row.id), transferSettings: currentTransferSettings };
     }));
 
     if (!result.reused && realtime && result.notificationIds.length) await publishNotifications(prisma, realtime, result.notificationIds);
@@ -276,23 +281,25 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?:
         if (mercadoPagoUsdUnsupported(error)) throw new AppError(503, 'MERCADOPAGO_USD_UNSUPPORTED', 'Mercado Pago no admite pagos en USD para esta cuenta');
       }
     }
-    return res.status(result.reused ? 200 : 201).json({ order: mapOrder(order), reused: result.reused });
+    return res.status(result.reused ? 200 : 201).json({ order: mapOrder(order, result.transferSettings), reused: result.reused });
   });
 
   router.get('/orders', requireUser, async (req, res) => {
     const user = currentUser(req)!.user;
+    const transferSettings = await getTransferSettings(prisma);
     const limit = Math.min(50, Math.max(1, Number(req.query.limit ?? 20)));
     const orders = await prisma.order.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'desc' }, take: limit + 1, ...(req.query.cursor ? { skip: 1, cursor: { id: String(req.query.cursor) } } : {}), include: { items: true, transferReceipts: { orderBy: { createdAt: 'desc' }, take: 1 }, payment: { include: { transfer: true, mercadoPago: true } } } });
     const hasMore = orders.length > limit;
     const page = hasMore ? orders.slice(0, limit) : orders;
-    return res.json({ data: page.map(mapOrder), nextCursor: hasMore ? page.at(-1)?.id ?? null : null });
+    return res.json({ data: page.map((order) => mapOrder(order, transferSettings)), nextCursor: hasMore ? page.at(-1)?.id ?? null : null });
   });
 
   router.get('/orders/:number', requireUser, async (req, res) => {
     const user = currentUser(req)!.user;
+    const transferSettings = await getTransferSettings(prisma);
     const order = await prisma.order.findFirst({ where: { number: String(req.params.number), userId: user.id }, include: { items: true, statusHistory: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }, transferReceipts: { orderBy: { createdAt: 'desc' }, take: 1 }, payment: { include: { transfer: true, mercadoPago: true } } } });
     if (!order) throw notFound('Order not found');
-    return res.json({ order: mapOrder(order) });
+    return res.json({ order: mapOrder(order, transferSettings) });
   });
 
   router.post('/orders/:number/cancel', requireUser, async (req, res) => {

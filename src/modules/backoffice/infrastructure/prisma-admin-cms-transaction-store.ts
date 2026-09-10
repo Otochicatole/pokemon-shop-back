@@ -5,7 +5,7 @@ import type { PickupPointWrite, ShippingZoneWrite } from '../application/ports.j
 import type { JsonValue, OrderDto, OrderStatusMutationDto, RefundDto, SupplierDto, TransferReviewDto } from '../application/dtos.js';
 import type {
   AdminActor, AuditListQuery, CustomerListQuery, OrderListQuery, OrderStatusValue,
-  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierWrite, LoyaltyProgramWrite,
+  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierWrite, LoyaltyProgramWrite, TransferSettingsWrite,
 } from '../domain/admin-cms.js';
 import { allowedOrderTransitions } from '../domain/admin-cms.js';
 import { getLoyaltyProgram, mapLoyaltyProgram, releaseOrderLoyaltyReservation, reverseOrderLoyalty, settleOrderLoyalty } from '../../loyalty/index.js';
@@ -13,6 +13,7 @@ import { BASE_CURRENCY } from '../../../shared/currency.js';
 import type { BaseCurrency } from '../../../shared/currency.js';
 import type { SupportRealtimeHub } from '../../support/support-realtime.js';
 import { createOrderStatusNotification, publishNotifications } from '../../notifications/index.js';
+import { getTransferSettings as readTransferSettings, mapTransferSettings, transferSettingsConfigured } from '../../payments/index.js';
 
 type Coordinator = { run<T>(operation: () => Promise<T>): Promise<T> };
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -615,6 +616,41 @@ export class PrismaAdminCmsTransactionStore {
       const program = await getLoyaltyProgram(tx);
       await tx.auditLog.create({ data: auditData(actor, 'LOYALTY_PROGRAM_UPDATED', 'LoyaltyProgram', program.id, { enabled: program.enabled, version: program.version, spendPerPointMinor: program.spendPerPointMinor.toString(), pointsPerStep: program.pointsPerStep, pointValueMinor: program.pointValueMinor.toString(), minimumRedemptionPoints: program.minimumRedemptionPoints, maximumRedemptionPercent: program.maximumRedemptionPercent }) });
       return mapLoyaltyProgram(program);
+    }));
+  }
+
+  async getTransferSettings() {
+    return mapTransferSettings(await readTransferSettings(this.prisma));
+  }
+
+  updateTransferSettings(actor: AdminActor, input: TransferSettingsWrite) {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const bankName = input.bankName.trim();
+      const accountHolder = input.accountHolder.trim();
+      const cbu = input.cbu?.trim() || null;
+      const alias = input.alias?.trim() || null;
+      const next = { enabled: input.enabled, bankName, accountHolder, cbu, alias };
+      if (input.enabled && !transferSettingsConfigured(next)) throw badRequest('TRANSFER_SETTINGS_INCOMPLETE', 'Para activar la transferencia se requiere banco, titular y CBU o alias');
+      const changed = await tx.transferSettings.updateMany({
+        where: { id: 'default', version: input.expectedVersion },
+        data: { ...next, updatedById: actor.adminId, version: { increment: 1 } },
+      });
+      if (changed.count !== 1) {
+        if (!await tx.transferSettings.count({ where: { id: 'default' } })) throw notFound('Transfer settings not found');
+        throw conflict('TRANSFER_SETTINGS_CHANGED', 'La configuración fue modificada por otro administrador');
+      }
+      const settings = await readTransferSettings(tx);
+      await tx.auditLog.create({ data: auditData(actor, 'TRANSFER_SETTINGS_UPDATED', 'TransferSettings', settings.id, {
+        enabled: settings.enabled,
+        version: settings.version,
+        configuredFields: {
+          bankName: Boolean(settings.bankName),
+          accountHolder: Boolean(settings.accountHolder),
+          cbu: Boolean(settings.cbu),
+          alias: Boolean(settings.alias),
+        },
+      }) });
+      return mapTransferSettings(settings);
     }));
   }
 

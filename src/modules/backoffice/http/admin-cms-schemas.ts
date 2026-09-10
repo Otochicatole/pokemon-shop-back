@@ -10,6 +10,10 @@ const nullableProductText = (max: number) => z.preprocess(
   (value) => value === '' ? null : value,
   z.string().trim().max(max).nullable().optional(),
 );
+const nullableTransferText = (max: number) => z.preprocess(
+  (value) => value === '' || value === undefined ? null : value,
+  z.string().trim().max(max).nullable(),
+);
 const booleanQuery = z.preprocess((value) => value === 'true' ? true : value === 'false' ? false : value, z.boolean().optional());
 const cursorQuery = z.object({ cursor: optionalText(100), limit: z.coerce.number().int().min(1).max(100).default(20) });
 const dateQuery = z.preprocess(emptyToUndefined, z.coerce.date().optional());
@@ -106,4 +110,18 @@ export const loyaltyProgramWriteSchema = z.object({
   minimumRedemptionPoints: z.number().int().min(1).max(2_000_000_000),
   maximumRedemptionPercent: z.number().int().min(1).max(90),
   expectedVersion: z.number().int().min(1),
+});
+
+export const transferSettingsWriteSchema = z.object({
+  enabled: z.boolean(),
+  bankName: z.string().trim().max(120),
+  accountHolder: z.string().trim().max(120),
+  cbu: nullableTransferText(100),
+  alias: nullableTransferText(100),
+  expectedVersion: z.number().int().min(1),
+}).superRefine((value, context) => {
+  if (!value.enabled) return;
+  if (!value.bankName || !value.accountHolder || (!value.cbu && !value.alias)) {
+    context.addIssue({ code: 'custom', path: ['enabled'], message: 'Para activar la transferencia se requiere banco, titular y CBU o alias' });
+  }
 });

@@ -23,6 +23,7 @@ describe('loyalty purchase lifecycle', () => {
   const receiptId = randomUUID();
   const actor = { adminId, requestId: `loyalty-test-${fixture}` };
   let originalProgram: LoyaltyProgram | null = null;
+  let originalTransferSettings: Awaited<ReturnType<typeof prisma.transferSettings.findUnique>>;
   let userId = '';
   let orderId = '';
   let orderNumber = '';
@@ -32,6 +33,14 @@ describe('loyalty purchase lifecycle', () => {
   let csrfToken = '';
 
   beforeAll(async () => {
+    originalTransferSettings = await prisma.transferSettings.findUnique({ where: { id: 'default' } });
+    await prisma.transferSettings.update({ where: { id: 'default' }, data: {
+      enabled: true,
+      bankName: 'Test Bank',
+      accountHolder: 'Test Account',
+      cbu: '1234567890123456789012',
+      alias: null,
+    } });
     originalProgram = await prisma.loyaltyProgram.findUnique({ where: { id: 'default' } });
     await prisma.loyaltyProgram.upsert({
       where: { id: 'default' },
@@ -122,6 +131,18 @@ describe('loyalty purchase lifecycle', () => {
       });
     } else {
       await prisma.loyaltyProgram.deleteMany({ where: { id: 'default' } });
+    }
+    if (originalTransferSettings) {
+      await prisma.transferSettings.update({ where: { id: 'default' }, data: {
+        enabled: originalTransferSettings.enabled,
+        bankName: originalTransferSettings.bankName,
+        accountHolder: originalTransferSettings.accountHolder,
+        cbu: originalTransferSettings.cbu,
+        alias: originalTransferSettings.alias,
+        version: originalTransferSettings.version,
+        updatedById: originalTransferSettings.updatedById,
+        updatedAt: originalTransferSettings.updatedAt,
+      } });
     }
     await prisma.admin.deleteMany({ where: { id: adminId } });
     await prisma.$disconnect();

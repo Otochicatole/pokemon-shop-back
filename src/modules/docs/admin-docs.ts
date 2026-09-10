@@ -3,7 +3,7 @@ import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import {
   activeSchema, auditListQuerySchema, cursorQuerySchema, customerListQuerySchema, dashboardQuerySchema,
   expectedVersionSchema, idParamsSchema, imageOrderSchema, imagePatchSchema, imageUploadFieldsSchema, inventoryAdjustmentSchema,
-  loyaltyProgramWriteSchema, orderActionSchema, orderListQuerySchema, orderParamsSchema, orderTransitionSchema, paymentsQuerySchema,
+  loyaltyProgramWriteSchema, transferSettingsWriteSchema, orderActionSchema, orderListQuerySchema, orderParamsSchema, orderTransitionSchema, paymentsQuerySchema,
   pickupPointWriteSchema, productImageParamsSchema, productListQuerySchema, productPatchSchema,
   productWriteSchema, refundSchema, shippingZoneWriteSchema, supplierActiveSchema, supplierListQuerySchema,
   supplierPatchSchema, supplierWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
@@ -14,7 +14,7 @@ import {
   adminOrderStatusDataSchema, adminPickupPointResultDataSchema, adminProductDetailDataSchema, adminProductImageOrderDataSchema,
   adminProductImagesDataSchema, adminProductImageUpdateDataSchema, adminProductSchema, adminProductStatusDataSchema,
   adminShippingZoneResultDataSchema, adminTransferReviewDataSchema,
-  adminSupplierActiveMutationDataSchema, adminSupplierDetailDataSchema, adminSupplierSchema, adminTcgdexCardDataSchema,
+  adminSupplierActiveMutationDataSchema, adminSupplierDetailDataSchema, adminSupplierSchema, adminTcgdexCardDataSchema, adminTransferSettingsSchema,
   adminTcgdexCardSummarySchema,
 } from '../backoffice/index.js';
 
@@ -45,10 +45,13 @@ export function registerAdminCmsPaths(registry: OpenAPIRegistry, { problemSchema
   registry.register('AdminSupplierPatch', supplierPatchSchema);
   registry.register('AdminLoyaltyProgramWrite', loyaltyProgramWriteSchema);
   registry.register('AdminLoyaltyProgram', adminLoyaltyProgramSchema);
+  registry.register('AdminTransferSettings', adminTransferSettingsSchema);
 
   registry.registerPath({ method: 'get', path: '/api/v2/admin/dashboard', tags: ['Admin dashboard'], summary: 'Read operational and commercial metrics', security, request: { query: dashboardQuerySchema }, responses: ok('Dashboard for the selected date range', adminDashboardDataSchema) });
   registry.registerPath({ method: 'get', path: '/api/v2/admin/loyalty/config', tags: ['Admin loyalty'], summary: 'Read the configurable earning and redemption rules', security, responses: ok('Current loyalty program configuration', adminLoyaltyProgramSchema) });
   registry.registerPath({ method: 'patch', path: '/api/v2/admin/loyalty/config', tags: ['Admin loyalty'], summary: 'Update loyalty rules using optimistic concurrency', security, request: { headers: csrf, body: json(loyaltyProgramWriteSchema) }, responses: ok('Loyalty program configuration updated', adminLoyaltyProgramSchema) });
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/config/transfer', tags: ['Admin configuration'], summary: 'Read bank transfer configuration', security, responses: ok('Current bank transfer configuration', adminTransferSettingsSchema) });
+  registry.registerPath({ method: 'patch', path: '/api/v2/admin/config/transfer', tags: ['Admin configuration'], summary: 'Update bank transfer configuration using optimistic concurrency', security, request: { headers: csrf, body: json(transferSettingsWriteSchema) }, responses: ok('Bank transfer configuration updated', adminTransferSettingsSchema) });
 
   registry.registerPath({ method: 'get', path: '/api/v2/admin/tcgdex/cards', tags: ['Admin products'], summary: 'Search the TCGdex card catalog for product autofill', security, request: { query: tcgdexSearchQuerySchema }, responses: ok('Matching TCGdex cards', z.array(adminTcgdexCardSummarySchema)) });
   registry.registerPath({ method: 'get', path: '/api/v2/admin/tcgdex/cards/{id}', tags: ['Admin products'], summary: 'Read a full TCGdex card for product autofill', security, request: { params: tcgdexCardParamsSchema }, responses: ok('TCGdex card details', adminTcgdexCardDataSchema) });

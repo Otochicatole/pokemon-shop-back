@@ -8,8 +8,17 @@ describe('checkout invariants', () => {
   let userAgent: request.Agent;
   let csrfToken = '';
   let productId = '';
+  let originalTransferSettings: Awaited<ReturnType<typeof prisma.transferSettings.findUnique>>;
 
   beforeAll(async () => {
+    originalTransferSettings = await prisma.transferSettings.findUnique({ where: { id: 'default' } });
+    await prisma.transferSettings.update({ where: { id: 'default' }, data: {
+      enabled: true,
+      bankName: 'Test Bank',
+      accountHolder: 'Test Account',
+      cbu: '1234567890123456789012',
+      alias: null,
+    } });
     const pickup = await prisma.pickupPoint.create({ data: { name: `Test pickup ${Date.now()}`, address: 'Test address' } });
     const product = await prisma.product.create({ data: { sku: `TEST-${Date.now()}`, slug: `test-${Date.now()}`, name: 'Test card', description: 'Test', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 1000n, currency: 'USD', status: 'PUBLISHED', publishedAt: new Date(), inventory: { create: { onHand: 1 } } } });
     productId = product.id;
@@ -28,6 +37,18 @@ describe('checkout invariants', () => {
     await prisma.pickupPoint.deleteMany({ where: { name: { startsWith: 'Test pickup ' } } });
     await prisma.product.delete({ where: { id: productId } }).catch(() => undefined);
     await prisma.user.deleteMany({ where: { email } });
+    if (originalTransferSettings) {
+      await prisma.transferSettings.update({ where: { id: 'default' }, data: {
+        enabled: originalTransferSettings.enabled,
+        bankName: originalTransferSettings.bankName,
+        accountHolder: originalTransferSettings.accountHolder,
+        cbu: originalTransferSettings.cbu,
+        alias: originalTransferSettings.alias,
+        version: originalTransferSettings.version,
+        updatedById: originalTransferSettings.updatedById,
+        updatedAt: originalTransferSettings.updatedAt,
+      } });
+    }
     await prisma.$disconnect();
   });
 
@@ -38,6 +59,7 @@ describe('checkout invariants', () => {
     const first = await userAgent.post('/api/v2/orders').set('X-CSRF-Token', csrfToken).set('Idempotency-Key', idempotencyKey).send(body);
     expect(first.status).toBe(201);
     expect(first.body.data.order.payment.method).toBe('BANK_TRANSFER');
+    expect(first.body.data.order.payment.bankInstructions).toEqual({ bankName: 'Test Bank', accountHolder: 'Test Account', cbu: '1234567890123456789012', alias: null });
     const second = await userAgent.post('/api/v2/orders').set('X-CSRF-Token', csrfToken).set('Idempotency-Key', idempotencyKey).send(body);
     expect(second.status).toBe(200);
     expect(second.body.data.reused).toBe(true);

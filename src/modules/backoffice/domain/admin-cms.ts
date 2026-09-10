@@ -69,6 +69,15 @@ export type LoyaltyProgramWrite = {
   expectedVersion: number;
 };
 
+export type TransferSettingsWrite = {
+  enabled: boolean;
+  bankName: string;
+  accountHolder: string;
+  cbu: string | null;
+  alias: string | null;
+  expectedVersion: number;
+};
+
 export type ProductListQuery = CursorPage & {
   search?: string;
   status?: ProductStatusValue;

@@ -22,6 +22,10 @@ export const adminLoyaltyProgramSchema = z.object({
   minimumRedemptionPoints: z.number().int().positive(), maximumRedemptionPercent: z.number().int().min(1).max(90),
   version: z.number().int().positive(), updatedAt: dateTime,
 });
+export const adminTransferSettingsSchema = z.object({
+  enabled: z.boolean(), bankName: z.string(), accountHolder: z.string(), cbu: z.string().nullable(), alias: z.string().nullable(),
+  version: z.number().int().positive(), updatedAt: dateTime, currency: z.literal(BASE_CURRENCY),
+});
 
 export const adminProductImageSchema = z.object({
   id: z.string().uuid(), fileId: z.string().uuid(), url: z.string(), altText: z.string().nullable(),

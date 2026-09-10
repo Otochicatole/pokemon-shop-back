@@ -11,7 +11,7 @@ import {
   pickupPointWriteSchema, productImageParamsSchema, productListQuerySchema, productPatchSchema,
   productWriteSchema, refundSchema, shippingZoneWriteSchema, supplierActiveSchema, supplierListQuerySchema,
   supplierPatchSchema, supplierWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
-  loyaltyProgramWriteSchema, tcgdexCardParamsSchema, tcgdexImageImportSchema, tcgdexSearchQuerySchema,
+  loyaltyProgramWriteSchema, transferSettingsWriteSchema, tcgdexCardParamsSchema, tcgdexImageImportSchema, tcgdexSearchQuerySchema,
 } from './admin-cms-schemas.js';
 import { getCard, searchCards } from '../../tcgdex/index.js';
 
@@ -60,6 +60,8 @@ export function createAdminCmsRouter({ application, upload, requireAdmin, actorF
 
   router.get('/loyalty/config', async (_req, res) => res.json(await application.loyalty.get()));
   router.patch('/loyalty/config', async (req, res) => res.json(await application.loyalty.update(actorFromRequest(req), loyaltyProgramWriteSchema.parse(req.body))));
+  router.get('/config/transfer', async (_req, res) => res.json(await application.transferSettings.get()));
+  router.patch('/config/transfer', async (req, res) => res.json(await application.transferSettings.update(actorFromRequest(req), transferSettingsWriteSchema.parse(req.body))));
 
   router.get('/tcgdex/cards', async (req, res) => {
     const query = tcgdexSearchQuerySchema.parse(req.query);

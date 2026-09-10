@@ -246,6 +246,7 @@ model Admin {
   refunds               RefundRecord[]
   bankTransfers         BankTransfer[]
   loyaltyProgramUpdates LoyaltyProgram[]
+  transferSettingsUpdates TransferSettings[]
   notifications         Notification[]      @relation("AdminNotifications")
 }
 
@@ -263,6 +264,22 @@ model LoyaltyProgram {
   createdAt                DateTime @default(now())
   updatedAt                DateTime @updatedAt
   updatedBy                Admin?   @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([updatedById])
+}
+
+model TransferSettings {
+  id          String   @id @default("default")
+  enabled     Boolean  @default(false)
+  bankName    String   @default("")
+  accountHolder String @default("")
+  cbu         String?
+  alias       String?
+  version     Int      @default(1)
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  updatedBy   Admin?   @relation(fields: [updatedById], references: [id], onDelete: SetNull)
 
   @@index([updatedById])
 }

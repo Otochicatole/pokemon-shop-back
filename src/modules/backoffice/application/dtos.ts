@@ -26,6 +26,16 @@ export type LoyaltyProgramDto = {
   updatedAt: Date;
 };
 
+export type TransferSettingsDto = {
+  enabled: boolean;
+  bankName: string;
+  accountHolder: string;
+  cbu: string | null;
+  alias: string | null;
+  version: number;
+  updatedAt: Date;
+};
+
 export type LoyaltyAccountDto = {
   balance: number;
   reserved: number;
