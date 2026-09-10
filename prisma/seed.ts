@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
+import { BASE_CURRENCY } from '../src/shared/currency.js';
 
 const prisma = new PrismaClient();
 const storageRoot = path.resolve(process.env.STORAGE_ROOT ?? './storage');
@@ -13,6 +14,8 @@ const userEmail = process.env.SEED_USER_EMAIL ?? 'user@cardshop.test';
 const userPassword = process.env.SEED_USER_PASSWORD ?? 'User123!seed-card-shop';
 const loyaltyProgramId = 'default';
 const demoLoyaltyStartingPoints = 40;
+
+// Seed prices are expressed directly in USD minor units.
 
 type SeedPokemonType = 'COLORLESS' | 'DARKNESS' | 'DRAGON' | 'FAIRY' | 'FIGHTING' | 'FIRE' | 'GRASS' | 'LIGHTNING' | 'METAL' | 'PSYCHIC' | 'WATER';
 type SeedCondition = 'NM' | 'EXCELLENT' | 'GOOD' | 'PLAYED' | 'DAMAGED';
@@ -78,23 +81,23 @@ type SeedOrderFixture = {
 };
 
 const products: SeedProduct[] = [
-  { id: '11111111-1111-4111-8111-111111111111', sku: 'CARD-BASE-001', slug: 'aurora-dragon', name: 'Aurora Dragon', description: 'Una pieza holográfica de presencia luminosa, seleccionada por su estado y acabado.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 185000n, stock: 1, pokemonCard: { pokemonType: 'DRAGON', setName: 'Aurora Origins', setCode: 'AOR', cardNumber: '001/120', rarity: 'Ultra Rare', language: 'ES', condition: 'NM', finish: 'Holo', edition: 'Primera edición', gradingCompany: 'PSA', grade: '10', certificationNumber: 'AOR-000001' } },
-  { id: '22222222-2222-4222-8222-222222222222', sku: 'CARD-BASE-014', slug: 'forest-guardian', name: 'Forest Guardian', description: 'Carta individual con ilustración de bosque y una textura foil delicada.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 76000n, stock: 1, pokemonCard: { pokemonType: 'GRASS', setName: 'Verdant Clash', setCode: 'VCL', cardNumber: '014/098', rarity: 'Rare Holo', language: 'EN', condition: 'NM', finish: 'Foil', edition: 'Unlimited', gradingCompany: null, grade: null, certificationNumber: null } },
-  { id: '33333333-3333-4333-8333-333333333333', sku: 'CARD-BASE-027', slug: 'volcanic-spark', name: 'Volcanic Spark', description: 'Una carta intensa para quienes buscan color y carácter en su binder.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 42000n, stock: 1, pokemonCard: { pokemonType: 'FIRE', setName: 'Ember Rise', setCode: 'EMR', cardNumber: '027/110', rarity: 'Illustration Rare', language: 'ES', condition: 'EXCELLENT', finish: 'Reverse Holo', edition: 'Unlimited', gradingCompany: null, grade: null, certificationNumber: null } },
-  { id: '44444444-4444-4444-8444-444444444444', sku: 'CARD-BASE-039', slug: 'moonlit-fox', name: 'Moonlit Fox', description: 'Edición especial de tirada corta, protegida y lista para exhibir.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 99000n, stock: 1, pokemonCard: { pokemonType: 'DARKNESS', setName: 'Nocturne Set', setCode: 'NOC', cardNumber: '039/088', rarity: 'Special Rare', language: 'JP', condition: 'NM', finish: 'Holo', edition: 'Promo', gradingCompany: null, grade: null, certificationNumber: null } },
-  { id: '55555555-5555-4555-8555-555555555555', sku: 'SEALED-BASE-001', slug: 'aurora-booster-box', name: 'Aurora Origins Booster Box', description: 'Caja sellada de 36 sobres para abrir, guardar o regalar.', kind: 'SEALED_PRODUCT', stockMode: 'QUANTITY', priceMinor: 1250000n, stock: 12, pokemonCard: null },
-  { id: '66666666-6666-4666-8666-666666666666', sku: 'SEALED-BASE-002', slug: 'verdant-elite-trainer', name: 'Verdant Clash Elite Trainer Box', description: 'Caja de entrenador con accesorios y sobres de la expansión.', kind: 'SEALED_PRODUCT', stockMode: 'QUANTITY', priceMinor: 780000n, stock: 8, pokemonCard: null },
-  { id: '77777777-7777-4777-8777-777777777777', sku: 'SEALED-BASE-003', slug: 'ember-rise-bundle', name: 'Ember Rise Bundle', description: 'Bundle sellado para comenzar una nueva búsqueda sin perder el ritual.', kind: 'SEALED_PRODUCT', stockMode: 'QUANTITY', priceMinor: 315000n, stock: 15, pokemonCard: null },
-  { id: '88888888-8888-4888-8888-888888888888', sku: 'ACCESSORY-001', slug: 'collector-protector-kit', name: 'Collector Protector Kit', description: 'Kit de sleeves y protectores rígidos para cuidar tu colección.', kind: 'ACCESSORY', stockMode: 'QUANTITY', priceMinor: 68000n, stock: 30, pokemonCard: null },
-  { id: '99999991-9999-4999-8999-999999999991', sku: 'CARD-BASE-052', slug: 'tidal-sovereign', name: 'Tidal Sovereign', description: 'Carta de tipo Agua con arte clásico y desgaste leve de colección.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 29000n, stock: 1, pokemonCard: { pokemonType: 'WATER', setName: 'Ocean Echoes', setCode: 'OCE', cardNumber: '052/112', rarity: 'Rare', language: 'EN', condition: 'GOOD', finish: 'Non-Holo', edition: 'Unlimited', gradingCompany: null, grade: null, certificationNumber: null } },
-  { id: '99999992-9999-4999-8999-999999999992', sku: 'CARD-BASE-061', slug: 'storm-runner', name: 'Storm Runner', description: 'Carta eléctrica rápida con brillo holográfico y bordes impecables.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 61000n, stock: 1, pokemonCard: { pokemonType: 'LIGHTNING', setName: 'Tempest Circuit', setCode: 'TPC', cardNumber: '061/104', rarity: 'Rare Holo', language: 'ES', condition: 'NM', finish: 'Holo', edition: 'Primera edición', gradingCompany: null, grade: null, certificationNumber: null } },
-  { id: '99999993-9999-4999-8999-999999999993', sku: 'CARD-BASE-073', slug: 'iron-sentinel', name: 'Iron Sentinel', description: 'Full art de tipo Metal con textura marcada para una carpeta moderna.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 87000n, stock: 1, pokemonCard: { pokemonType: 'METAL', setName: 'Chrome Frontier', setCode: 'CHF', cardNumber: '073/100', rarity: 'Full Art Rare', language: 'EN', condition: 'EXCELLENT', finish: 'Full Art', edition: 'Unlimited', gradingCompany: null, grade: null, certificationNumber: null } },
-  { id: '99999994-9999-4999-8999-999999999994', sku: 'CARD-BASE-081', slug: 'mind-oracle', name: 'Mind Oracle', description: 'Carta psíquica jugada, ideal para completar una colección a buen precio.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 18000n, stock: 0, pokemonCard: { pokemonType: 'PSYCHIC', setName: 'Astral Bonds', setCode: 'ASB', cardNumber: '081/126', rarity: 'Uncommon', language: 'ES', condition: 'PLAYED', finish: 'Reverse Holo', edition: 'Unlimited', gradingCompany: null, grade: null, certificationNumber: null } },
-  { id: '99999995-9999-4999-8999-999999999995', sku: 'CARD-BASE-095', slug: 'fairy-wish', name: 'Fairy Wish', description: 'Promo de tipo Hada con patrón cosmos y presentación para exhibición.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 54000n, stock: 1, pokemonCard: { pokemonType: 'FAIRY', setName: 'Dreamlight Promos', setCode: 'DLP', cardNumber: '095/P', rarity: 'Promo', language: 'JP', condition: 'NM', finish: 'Cosmos Holo', edition: 'Promo', gradingCompany: 'CGC', grade: '9.5', certificationNumber: 'DLP-000095' } },
-  { id: '99999996-9999-4999-8999-999999999996', sku: 'CARD-BASE-103', slug: 'arena-bruiser', name: 'Arena Bruiser', description: 'Carta de tipo Lucha con señales visibles de juego y precio accesible.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 9000n, stock: 1, pokemonCard: { pokemonType: 'FIGHTING', setName: 'Arena Rivals', setCode: 'ARV', cardNumber: '103/130', rarity: 'Common', language: 'EN', condition: 'DAMAGED', finish: 'Non-Holo', edition: 'Unlimited', gradingCompany: null, grade: null, certificationNumber: null } },
-  { id: '99999997-9999-4999-8999-999999999997', sku: 'CARD-BASE-117', slug: 'wandering-companion', name: 'Wandering Companion', description: 'Illustration rare incolora con acabado cálido y estado de colección.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 114000n, stock: 1, pokemonCard: { pokemonType: 'COLORLESS', setName: 'Open Roads', setCode: 'OPR', cardNumber: '117/142', rarity: 'Illustration Rare', language: 'ES', condition: 'NM', finish: 'Foil', edition: 'Unlimited', gradingCompany: null, grade: null, certificationNumber: null } },
-  { id: '99999998-9999-4999-8999-999999999998', sku: 'ACCESSORY-002', slug: 'vault-binder-nine-pocket', name: 'Vault Binder 9-Pocket', description: 'Binder de carga lateral con cierre y capacidad para 360 cartas.', kind: 'ACCESSORY', stockMode: 'QUANTITY', priceMinor: 145000n, stock: 18, pokemonCard: null },
-  { id: '99999999-9999-4999-8999-999999999998', sku: 'ACCESSORY-003', slug: 'aurora-playmat', name: 'Aurora Playmat', description: 'Playmat de neoprene con superficie suave y base antideslizante.', kind: 'ACCESSORY', stockMode: 'QUANTITY', priceMinor: 92000n, stock: 22, pokemonCard: null },
+  { id: '11111111-1111-4111-8111-111111111111', sku: 'CARD-BASE-001', slug: 'aurora-dragon', name: 'Aurora Dragon', description: 'Una pieza holográfica de presencia luminosa, seleccionada por su estado y acabado.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 122n, stock: 1, pokemonCard: { pokemonType: 'DRAGON', setName: 'Aurora Origins', setCode: 'AOR', cardNumber: '001/120', rarity: 'Ultra Rare', language: 'ES', condition: 'NM', finish: 'Holo', edition: 'Primera edición', gradingCompany: 'PSA', grade: '10', certificationNumber: 'AOR-000001' } },
+  { id: '22222222-2222-4222-8222-222222222222', sku: 'CARD-BASE-014', slug: 'forest-guardian', name: 'Forest Guardian', description: 'Carta individual con ilustración de bosque y una textura foil delicada.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 50n, stock: 1, pokemonCard: { pokemonType: 'GRASS', setName: 'Verdant Clash', setCode: 'VCL', cardNumber: '014/098', rarity: 'Rare Holo', language: 'EN', condition: 'NM', finish: 'Foil', edition: 'Unlimited', gradingCompany: null, grade: null, certificationNumber: null } },
+  { id: '33333333-3333-4333-8333-333333333333', sku: 'CARD-BASE-027', slug: 'volcanic-spark', name: 'Volcanic Spark', description: 'Una carta intensa para quienes buscan color y carácter en su binder.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 28n, stock: 1, pokemonCard: { pokemonType: 'FIRE', setName: 'Ember Rise', setCode: 'EMR', cardNumber: '027/110', rarity: 'Illustration Rare', language: 'ES', condition: 'EXCELLENT', finish: 'Reverse Holo', edition: 'Unlimited', gradingCompany: null, grade: null, certificationNumber: null } },
+  { id: '44444444-4444-4444-8444-444444444444', sku: 'CARD-BASE-039', slug: 'moonlit-fox', name: 'Moonlit Fox', description: 'Edición especial de tirada corta, protegida y lista para exhibir.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 65n, stock: 1, pokemonCard: { pokemonType: 'DARKNESS', setName: 'Nocturne Set', setCode: 'NOC', cardNumber: '039/088', rarity: 'Special Rare', language: 'JP', condition: 'NM', finish: 'Holo', edition: 'Promo', gradingCompany: null, grade: null, certificationNumber: null } },
+  { id: '55555555-5555-4555-8555-555555555555', sku: 'SEALED-BASE-001', slug: 'aurora-booster-box', name: 'Aurora Origins Booster Box', description: 'Caja sellada de 36 sobres para abrir, guardar o regalar.', kind: 'SEALED_PRODUCT', stockMode: 'QUANTITY', priceMinor: 822n, stock: 12, pokemonCard: null },
+  { id: '66666666-6666-4666-8666-666666666666', sku: 'SEALED-BASE-002', slug: 'verdant-elite-trainer', name: 'Verdant Clash Elite Trainer Box', description: 'Caja de entrenador con accesorios y sobres de la expansión.', kind: 'SEALED_PRODUCT', stockMode: 'QUANTITY', priceMinor: 513n, stock: 8, pokemonCard: null },
+  { id: '77777777-7777-4777-8777-777777777777', sku: 'SEALED-BASE-003', slug: 'ember-rise-bundle', name: 'Ember Rise Bundle', description: 'Bundle sellado para comenzar una nueva búsqueda sin perder el ritual.', kind: 'SEALED_PRODUCT', stockMode: 'QUANTITY', priceMinor: 207n, stock: 15, pokemonCard: null },
+  { id: '88888888-8888-4888-8888-888888888888', sku: 'ACCESSORY-001', slug: 'collector-protector-kit', name: 'Collector Protector Kit', description: 'Kit de sleeves y protectores rígidos para cuidar tu colección.', kind: 'ACCESSORY', stockMode: 'QUANTITY', priceMinor: 45n, stock: 30, pokemonCard: null },
+  { id: '99999991-9999-4999-8999-999999999991', sku: 'CARD-BASE-052', slug: 'tidal-sovereign', name: 'Tidal Sovereign', description: 'Carta de tipo Agua con arte clásico y desgaste leve de colección.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 19n, stock: 1, pokemonCard: { pokemonType: 'WATER', setName: 'Ocean Echoes', setCode: 'OCE', cardNumber: '052/112', rarity: 'Rare', language: 'EN', condition: 'GOOD', finish: 'Non-Holo', edition: 'Unlimited', gradingCompany: null, grade: null, certificationNumber: null } },
+  { id: '99999992-9999-4999-8999-999999999992', sku: 'CARD-BASE-061', slug: 'storm-runner', name: 'Storm Runner', description: 'Carta eléctrica rápida con brillo holográfico y bordes impecables.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 40n, stock: 1, pokemonCard: { pokemonType: 'LIGHTNING', setName: 'Tempest Circuit', setCode: 'TPC', cardNumber: '061/104', rarity: 'Rare Holo', language: 'ES', condition: 'NM', finish: 'Holo', edition: 'Primera edición', gradingCompany: null, grade: null, certificationNumber: null } },
+  { id: '99999993-9999-4999-8999-999999999993', sku: 'CARD-BASE-073', slug: 'iron-sentinel', name: 'Iron Sentinel', description: 'Full art de tipo Metal con textura marcada para una carpeta moderna.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 57n, stock: 1, pokemonCard: { pokemonType: 'METAL', setName: 'Chrome Frontier', setCode: 'CHF', cardNumber: '073/100', rarity: 'Full Art Rare', language: 'EN', condition: 'EXCELLENT', finish: 'Full Art', edition: 'Unlimited', gradingCompany: null, grade: null, certificationNumber: null } },
+  { id: '99999994-9999-4999-8999-999999999994', sku: 'CARD-BASE-081', slug: 'mind-oracle', name: 'Mind Oracle', description: 'Carta psíquica jugada, ideal para completar una colección a buen precio.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 12n, stock: 0, pokemonCard: { pokemonType: 'PSYCHIC', setName: 'Astral Bonds', setCode: 'ASB', cardNumber: '081/126', rarity: 'Uncommon', language: 'ES', condition: 'PLAYED', finish: 'Reverse Holo', edition: 'Unlimited', gradingCompany: null, grade: null, certificationNumber: null } },
+  { id: '99999995-9999-4999-8999-999999999995', sku: 'CARD-BASE-095', slug: 'fairy-wish', name: 'Fairy Wish', description: 'Promo de tipo Hada con patrón cosmos y presentación para exhibición.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 36n, stock: 1, pokemonCard: { pokemonType: 'FAIRY', setName: 'Dreamlight Promos', setCode: 'DLP', cardNumber: '095/P', rarity: 'Promo', language: 'JP', condition: 'NM', finish: 'Cosmos Holo', edition: 'Promo', gradingCompany: 'CGC', grade: '9.5', certificationNumber: 'DLP-000095' } },
+  { id: '99999996-9999-4999-8999-999999999996', sku: 'CARD-BASE-103', slug: 'arena-bruiser', name: 'Arena Bruiser', description: 'Carta de tipo Lucha con señales visibles de juego y precio accesible.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 6n, stock: 1, pokemonCard: { pokemonType: 'FIGHTING', setName: 'Arena Rivals', setCode: 'ARV', cardNumber: '103/130', rarity: 'Common', language: 'EN', condition: 'DAMAGED', finish: 'Non-Holo', edition: 'Unlimited', gradingCompany: null, grade: null, certificationNumber: null } },
+  { id: '99999997-9999-4999-8999-999999999997', sku: 'CARD-BASE-117', slug: 'wandering-companion', name: 'Wandering Companion', description: 'Illustration rare incolora con acabado cálido y estado de colección.', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 75n, stock: 1, pokemonCard: { pokemonType: 'COLORLESS', setName: 'Open Roads', setCode: 'OPR', cardNumber: '117/142', rarity: 'Illustration Rare', language: 'ES', condition: 'NM', finish: 'Foil', edition: 'Unlimited', gradingCompany: null, grade: null, certificationNumber: null } },
+  { id: '99999998-9999-4999-8999-999999999998', sku: 'ACCESSORY-002', slug: 'vault-binder-nine-pocket', name: 'Vault Binder 9-Pocket', description: 'Binder de carga lateral con cierre y capacidad para 360 cartas.', kind: 'ACCESSORY', stockMode: 'QUANTITY', priceMinor: 95n, stock: 18, pokemonCard: null },
+  { id: '99999999-9999-4999-8999-999999999998', sku: 'ACCESSORY-003', slug: 'aurora-playmat', name: 'Aurora Playmat', description: 'Playmat de neoprene con superficie suave y base antideslizante.', kind: 'ACCESSORY', stockMode: 'QUANTITY', priceMinor: 61n, stock: 22, pokemonCard: null },
 ];
 
 const suppliers = [
@@ -250,7 +253,7 @@ async function seedCmsOrders(input: {
         version: fixture.history.length,
         paymentMethod: fixture.paymentMethod,
         fulfillmentType: fixture.fulfillmentType,
-        currency: 'ARS',
+        currency: BASE_CURRENCY,
         subtotalMinor,
         shippingMinor,
         totalMinor,
@@ -311,7 +314,7 @@ async function seedCmsOrders(input: {
       }
 
       const providerReference = fixture.paymentMethod === 'BANK_TRANSFER' ? `TR-${fixture.number}` : `MP-${fixture.number}`;
-      const paymentData = { method: fixture.paymentMethod, status: fixture.paymentStatus, amountMinor: totalMinor, currency: 'ARS', providerReference, createdAt, updatedAt };
+      const paymentData = { method: fixture.paymentMethod, status: fixture.paymentStatus, amountMinor: totalMinor, currency: BASE_CURRENCY, providerReference, createdAt, updatedAt };
       await tx.payment.upsert({ where: { orderId }, update: paymentData, create: { id: paymentId, orderId, ...paymentData } });
 
       if (fixture.paymentMethod === 'BANK_TRANSFER') {
@@ -353,7 +356,7 @@ async function seedCmsOrders(input: {
       }
 
       if (fixture.refund) {
-        const refundData = { paymentId, fullRefundKey: paymentId, amountMinor: totalMinor, currency: 'ARS', reason: fixture.refund.reason, externalReference: fixture.refund.externalReference, createdAt: updatedAt, createdById: input.adminId };
+        const refundData = { paymentId, fullRefundKey: paymentId, amountMinor: totalMinor, currency: BASE_CURRENCY, reason: fixture.refund.reason, externalReference: fixture.refund.externalReference, createdAt: updatedAt, createdById: input.adminId };
         await tx.refundRecord.upsert({ where: { fullRefundKey: paymentId }, update: refundData, create: { id: seedUuid(0xb3, fixtureNumber), ...refundData } });
       }
 
@@ -417,10 +420,10 @@ async function main() {
     create: {
       id: loyaltyProgramId,
       enabled: true,
-      currency: 'ARS',
-      spendPerPointMinor: 30_000n,
+      currency: BASE_CURRENCY,
+      spendPerPointMinor: 300n,
       pointsPerStep: 1,
-      pointValueMinor: 1_500n,
+      pointValueMinor: 1n,
       minimumRedemptionPoints: 5,
       maximumRedemptionPercent: 25,
     },
@@ -442,7 +445,7 @@ async function main() {
   });
   await prisma.adminRecoveryCode.deleteMany({ where: { adminId: admin.id } });
   for (const product of products) {
-    await prisma.product.upsert({ where: { id: product.id }, update: { sku: product.sku, slug: product.slug, name: product.name, description: product.description, kind: product.kind, stockMode: product.stockMode, priceMinor: product.priceMinor, currency: 'ARS', status: 'PUBLISHED', publishedAt: new Date(), archivedAt: null, version: 1 }, create: { id: product.id, sku: product.sku, slug: product.slug, name: product.name, description: product.description, kind: product.kind, stockMode: product.stockMode, priceMinor: product.priceMinor, currency: 'ARS', status: 'PUBLISHED', publishedAt: new Date(), version: 1 } });
+    await prisma.product.upsert({ where: { id: product.id }, update: { sku: product.sku, slug: product.slug, name: product.name, description: product.description, kind: product.kind, stockMode: product.stockMode, priceMinor: product.priceMinor, currency: BASE_CURRENCY, status: 'PUBLISHED', publishedAt: new Date(), archivedAt: null, version: 1 }, create: { id: product.id, sku: product.sku, slug: product.slug, name: product.name, description: product.description, kind: product.kind, stockMode: product.stockMode, priceMinor: product.priceMinor, currency: BASE_CURRENCY, status: 'PUBLISHED', publishedAt: new Date(), version: 1 } });
     const currentInventory = await prisma.inventory.findUnique({ where: { productId: product.id } });
     if (!currentInventory) await prisma.inventory.create({ data: { productId: product.id, onHand: product.stock, reserved: 0, version: 1 } });
     else if (currentInventory.reserved === 0) await prisma.inventory.update({ where: { productId: product.id }, data: { onHand: product.stock } });
@@ -452,8 +455,8 @@ async function main() {
   const zone = await prisma.shippingZone.upsert({ where: { id: '99999999-9999-4999-8999-999999999999' }, update: { name: 'Argentina', active: true }, create: { id: '99999999-9999-4999-8999-999999999999', name: 'Argentina', active: true } });
   await prisma.shippingZoneProvince.deleteMany({ where: { zoneId: zone.id } });
   await prisma.shippingZoneProvince.createMany({ data: ['Buenos Aires', 'CABA', 'Córdoba', 'Santa Fe', 'Mendoza'].map((province) => ({ zoneId: zone.id, province })) });
-  const standardShippingRate = await prisma.shippingRate.upsert({ where: { id: 'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1' }, update: { zoneId: zone.id, name: 'Envío estándar', priceMinor: 65000n, currency: 'ARS', active: true }, create: { id: 'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1', zoneId: zone.id, name: 'Envío estándar', priceMinor: 65000n, currency: 'ARS', active: true } });
-  await prisma.shippingRate.upsert({ where: { id: 'aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2' }, update: { zoneId: zone.id, name: 'Envío express', priceMinor: 120000n, currency: 'ARS', active: true }, create: { id: 'aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2', zoneId: zone.id, name: 'Envío express', priceMinor: 120000n, currency: 'ARS', active: true } });
+  const standardShippingRate = await prisma.shippingRate.upsert({ where: { id: 'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1' }, update: { zoneId: zone.id, name: 'Envío estándar', priceMinor: 43n, currency: BASE_CURRENCY, active: true }, create: { id: 'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1', zoneId: zone.id, name: 'Envío estándar', priceMinor: 43n, currency: BASE_CURRENCY, active: true } });
+  await prisma.shippingRate.upsert({ where: { id: 'aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2' }, update: { zoneId: zone.id, name: 'Envío express', priceMinor: 79n, currency: BASE_CURRENCY, active: true }, create: { id: 'aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2', zoneId: zone.id, name: 'Envío express', priceMinor: 79n, currency: BASE_CURRENCY, active: true } });
   const pickupPoint = await prisma.pickupPoint.upsert({ where: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }, update: { name: 'Card Shop · Palermo', address: 'Av. Santa Fe 1234, CABA', active: true }, create: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: 'Card Shop · Palermo', address: 'Av. Santa Fe 1234, CABA', active: true } });
   for (const supplier of suppliers) {
     await prisma.supplier.upsert({ where: { id: supplier.id }, update: supplier, create: supplier });

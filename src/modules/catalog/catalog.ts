@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { PrismaClient } from '@prisma/client';
 import { ProductStatus } from '@prisma/client';
 import { notFound } from '../../shared/errors.js';
+import { BASE_CURRENCY } from '../../shared/currency.js';
 
 const listSchema = z.object({
   q: z.string().trim().max(100).optional(),
@@ -25,7 +26,7 @@ function mapProduct(product: any) {
     description: product.description,
     kind: product.kind,
     stockMode: product.stockMode,
-    price: { amountMinor: product.priceMinor.toString(), currency: product.currency },
+    price: { amountMinor: product.priceMinor.toString(), currency: BASE_CURRENCY },
     available,
     productVersion: product.version,
     pokemonCard: product.pokemonCard,

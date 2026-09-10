@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BASE_CURRENCY } from '../../../shared/currency.js';
 import { extendZodWithOpenApi } from '@asteasolutions/zod-to-openapi';
 import { catalogSorts, pokemonTypes, productConditions, productKinds } from '../domain/product.js';
 
@@ -42,7 +43,7 @@ export const catalogListQuerySchema = z.object({
 
 export const catalogMoneySchema = z.object({
   amountMinor: z.string().regex(/^\d+$/),
-  currency: z.literal('ARS'),
+  currency: z.literal(BASE_CURRENCY),
 });
 
 export const catalogPokemonCardSchema = z.object({

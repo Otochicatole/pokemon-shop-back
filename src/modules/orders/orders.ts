@@ -10,6 +10,7 @@ import { currentUser, requireUser } from '../../infrastructure/sessions.js';
 import { prisma as db, writeCoordinator } from '../../infrastructure/prisma.js';
 import { publicOrderNumber, sha256 } from '../../shared/ids.js';
 import { moneyDto } from '../../shared/money.js';
+import { BASE_CURRENCY } from '../../shared/currency.js';
 import { discardUnattachedFile, saveImage } from '../media/index.js';
 import { logger } from '../../infrastructure/logger.js';
 import { calculateLoyaltyQuote, releaseOrderLoyaltyReservation, reserveLoyaltyPoints, reverseOrderLoyalty, settleOrderLoyalty } from '../loyalty/index.js';
@@ -41,19 +42,19 @@ function mapOrder(order: any) {
     status: order.status,
     paymentMethod: order.paymentMethod,
     fulfillmentType: order.fulfillmentType,
-    totals: { subtotal: moneyDto({ amountMinor: order.subtotalMinor, currency: 'ARS' }), discount: moneyDto({ amountMinor: order.pointsDiscountMinor, currency: 'ARS' }), shipping: moneyDto({ amountMinor: order.shippingMinor, currency: 'ARS' }), total: moneyDto({ amountMinor: order.totalMinor, currency: 'ARS' }) },
+    totals: { subtotal: moneyDto({ amountMinor: order.subtotalMinor, currency: BASE_CURRENCY }), discount: moneyDto({ amountMinor: order.pointsDiscountMinor, currency: BASE_CURRENCY }), shipping: moneyDto({ amountMinor: order.shippingMinor, currency: BASE_CURRENCY }), total: moneyDto({ amountMinor: order.totalMinor, currency: BASE_CURRENCY }) },
     loyalty: {
       programVersion: order.loyaltyProgramVersion ?? null,
       pointsRedeemed: order.pointsRedeemed,
-      pointsDiscount: moneyDto({ amountMinor: order.pointsDiscountMinor, currency: 'ARS' }),
+      pointsDiscount: moneyDto({ amountMinor: order.pointsDiscountMinor, currency: BASE_CURRENCY }),
       pointsEarned: order.pointsEarned,
       redemptionStatus: order.loyaltyRedemptionStatus,
-      spendPerPoint: order.loyaltySpendPerPointMinor === null || order.loyaltySpendPerPointMinor === undefined ? null : moneyDto({ amountMinor: order.loyaltySpendPerPointMinor, currency: 'ARS' }),
-      pointValue: order.loyaltyPointValueMinor === null || order.loyaltyPointValueMinor === undefined ? null : moneyDto({ amountMinor: order.loyaltyPointValueMinor, currency: 'ARS' }),
+      spendPerPoint: order.loyaltySpendPerPointMinor === null || order.loyaltySpendPerPointMinor === undefined ? null : moneyDto({ amountMinor: order.loyaltySpendPerPointMinor, currency: BASE_CURRENCY }),
+      pointValue: order.loyaltyPointValueMinor === null || order.loyaltyPointValueMinor === undefined ? null : moneyDto({ amountMinor: order.loyaltyPointValueMinor, currency: BASE_CURRENCY }),
     },
     expiresAt: order.expiresAt,
-    items: order.items?.map((item: any) => ({ productId: item.productId, sku: item.sku, name: item.productName, imageFileId: item.imageFileId ?? null, imageUrl: item.imageFileId ? `/media/public/${item.imageFileId}` : null, quantity: item.quantity, unitPrice: moneyDto({ amountMinor: item.unitPriceMinor, currency: 'ARS' }), lineTotal: moneyDto({ amountMinor: item.lineTotalMinor, currency: 'ARS' }) })),
-    fulfillment: order.fulfillmentType === 'SHIPMENT' ? { type: 'SHIPMENT', recipientName: order.recipientName, recipientPhone: order.recipientPhone, addressLine1: order.addressLine1, addressLine2: order.addressLine2, city: order.city, province: order.province, postalCode: order.postalCode, shippingRateId: order.shippingRateId, shippingZoneName: order.shippingZoneName ?? null, shippingRateName: order.shippingRateName ?? null, shippingRatePrice: order.shippingRatePriceMinor === null || order.shippingRatePriceMinor === undefined ? null : moneyDto({ amountMinor: order.shippingRatePriceMinor, currency: 'ARS' }) } : { type: 'PICKUP', pickupPointId: order.pickupPointId, pickupPointName: order.pickupPointName ?? null, pickupPointAddress: order.pickupPointAddress ?? null },
+    items: order.items?.map((item: any) => ({ productId: item.productId, sku: item.sku, name: item.productName, imageFileId: item.imageFileId ?? null, imageUrl: item.imageFileId ? `/media/public/${item.imageFileId}` : null, quantity: item.quantity, unitPrice: moneyDto({ amountMinor: item.unitPriceMinor, currency: BASE_CURRENCY }), lineTotal: moneyDto({ amountMinor: item.lineTotalMinor, currency: BASE_CURRENCY }) })),
+    fulfillment: order.fulfillmentType === 'SHIPMENT' ? { type: 'SHIPMENT', recipientName: order.recipientName, recipientPhone: order.recipientPhone, addressLine1: order.addressLine1, addressLine2: order.addressLine2, city: order.city, province: order.province, postalCode: order.postalCode, shippingRateId: order.shippingRateId, shippingZoneName: order.shippingZoneName ?? null, shippingRateName: order.shippingRateName ?? null, shippingRatePrice: order.shippingRatePriceMinor === null || order.shippingRatePriceMinor === undefined ? null : moneyDto({ amountMinor: order.shippingRatePriceMinor, currency: BASE_CURRENCY }) } : { type: 'PICKUP', pickupPointId: order.pickupPointId, pickupPointName: order.pickupPointName ?? null, pickupPointAddress: order.pickupPointAddress ?? null },
     payment: order.payment ? { method: order.payment.method, status: order.payment.status, bankReference: order.payment.transfer?.reference ?? null, bankInstructions: order.payment.method === 'BANK_TRANSFER' && bankConfigured ? { bankName: env.BANK_NAME, accountHolder: env.BANK_ACCOUNT_HOLDER, cbu: env.BANK_CBU ?? null, alias: env.BANK_ALIAS ?? null } : null, receipt: order.transferReceipts?.[0] ? { fileId: order.transferReceipts[0].fileId, review: order.transferReceipts[0].review, createdAt: order.transferReceipts[0].createdAt } : null, checkoutUrl: order.payment.mercadoPago?.checkoutUrl ?? null, paymentSessionStatus: order.payment.mercadoPago && !order.payment.mercadoPago.checkoutUrl ? 'RETRY_REQUIRED' : 'READY' } : null,
     createdAt: order.createdAt,
   };
@@ -95,7 +96,7 @@ async function createMercadoPreference(order: any) {
   const client = new MercadoPagoConfig({ accessToken: env.MERCADOPAGO_ACCESS_TOKEN });
   const preference = new Preference(client);
   const response = await preference.create({ body: {
-    items: [{ id: order.number, title: `Compra ${order.number}`, quantity: 1, currency_id: 'ARS', unit_price: Number(order.totalMinor) / 100 }],
+    items: [{ id: order.number, title: `Compra ${order.number}`, quantity: 1, currency_id: BASE_CURRENCY, unit_price: Number(order.totalMinor) / 100 }],
     external_reference: order.number,
     notification_url: `${env.PUBLIC_API_URL ?? `http://localhost:${env.PORT}`}/api/v2/webhooks/mercado-pago`,
     back_urls: { success: `${env.frontendOrigins[0] ?? 'http://localhost:5173'}/account/orders/${order.number}`, failure: `${env.frontendOrigins[0] ?? 'http://localhost:5173'}/account/orders/${order.number}`, pending: `${env.frontendOrigins[0] ?? 'http://localhost:5173'}/account/orders/${order.number}` },
@@ -104,6 +105,11 @@ async function createMercadoPreference(order: any) {
     expiration_date_to: order.expiresAt?.toISOString(),
   } as any });
   return { id: response.id, initPoint: response.init_point ?? response.sandbox_init_point };
+}
+
+function mercadoPagoUsdUnsupported(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : JSON.stringify(error);
+  return /(currency_id|currency|usd).*(unsupported|not supported|invalid|not available|not allowed)|(unsupported|not supported|invalid|not available|not allowed).*(currency_id|currency|usd)/i.test(message);
 }
 
 export async function reconcileMercadoPayment(externalId: string) {
@@ -116,7 +122,7 @@ export async function reconcileMercadoPayment(externalId: string) {
     if (!payment) return;
     const expectedMinor = payment.amountMinor;
     const receivedMinor = typeof response.transaction_amount === 'number' ? BigInt(Math.round(response.transaction_amount * 100)) : -1n;
-    const valid = response.currency_id === 'ARS' && receivedMinor === expectedMinor && (!env.MERCADOPAGO_COLLECTOR_ID || String(response.collector_id ?? '') === env.MERCADOPAGO_COLLECTOR_ID);
+    const valid = response.currency_id === BASE_CURRENCY && receivedMinor === expectedMinor && (!env.MERCADOPAGO_COLLECTOR_ID || String(response.collector_id ?? '') === env.MERCADOPAGO_COLLECTOR_ID);
     const providerStatus = String(response.status ?? '');
     const mapped = providerStatus === 'approved' ? 'APPROVED' : providerStatus === 'pending' || providerStatus === 'in_process' || providerStatus === 'authorized' ? 'PENDING' : providerStatus === 'refunded' ? 'REFUNDED' : providerStatus === 'charged_back' || providerStatus === 'in_mediation' ? 'DISPUTED' : 'REJECTED';
     await writeCoordinator.run(() => db.$transaction(async (tx) => {
@@ -166,7 +172,7 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
       prisma.pickupPoint.findMany({ where: { active: true }, orderBy: { name: 'asc' } }),
     ]);
     const bankConfigured = Boolean(env.BANK_NAME && env.BANK_ACCOUNT_HOLDER && (env.BANK_CBU || env.BANK_ALIAS));
-    return res.json({ fulfillment: { shippingZones: zones.map((zone) => ({ id: zone.id, name: zone.name, provinces: zone.provinces.map((province) => province.province), rates: zone.rates.map((rate) => ({ id: rate.id, name: rate.name, price: moneyDto({ amountMinor: rate.priceMinor, currency: 'ARS' }) })) })), pickupPoints: pickupPoints.map((point) => ({ id: point.id, name: point.name, address: point.address })) }, paymentMethods: { BANK_TRANSFER: env.NODE_ENV !== 'production' || bankConfigured, MERCADO_PAGO: Boolean(env.MERCADOPAGO_ACCESS_TOKEN) } });
+    return res.json({ fulfillment: { shippingZones: zones.map((zone) => ({ id: zone.id, name: zone.name, provinces: zone.provinces.map((province) => province.province), rates: zone.rates.map((rate) => ({ id: rate.id, name: rate.name, price: moneyDto({ amountMinor: rate.priceMinor, currency: BASE_CURRENCY }) })) })), pickupPoints: pickupPoints.map((point) => ({ id: point.id, name: point.name, address: point.address })) }, paymentMethods: { BANK_TRANSFER: env.NODE_ENV !== 'production' || bankConfigured, MERCADO_PAGO: Boolean(env.MERCADOPAGO_ACCESS_TOKEN) } });
   });
   router.post('/checkout/preview', requireUser, async (req, res) => {
     const user = currentUser(req)!.user;
@@ -176,10 +182,10 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
     if (input.paymentMethod === 'MERCADO_PAGO' && !env.MERCADOPAGO_ACCESS_TOKEN) throw new AppError(503, 'PAYMENT_METHOD_NOT_CONFIGURED', 'Mercado Pago is not configured');
     const quote = await calculateCheckout(prisma, input, user.id);
     return res.json({
-      subtotal: moneyDto({ amountMinor: quote.subtotal, currency: 'ARS' }),
-      discount: moneyDto({ amountMinor: quote.discount, currency: 'ARS' }),
-      shipping: moneyDto({ amountMinor: quote.shipping, currency: 'ARS' }),
-      total: moneyDto({ amountMinor: quote.total, currency: 'ARS' }),
+      subtotal: moneyDto({ amountMinor: quote.subtotal, currency: BASE_CURRENCY }),
+      discount: moneyDto({ amountMinor: quote.discount, currency: BASE_CURRENCY }),
+      shipping: moneyDto({ amountMinor: quote.shipping, currency: BASE_CURRENCY }),
+      total: moneyDto({ amountMinor: quote.total, currency: BASE_CURRENCY }),
       loyalty: {
         enabled: quote.loyalty.program.enabled,
         balance: quote.loyalty.balance,
@@ -189,7 +195,7 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
         maximumRedeemablePoints: quote.loyalty.maximumRedeemablePoints,
         minimumRedemptionPoints: quote.loyalty.program.minimumRedemptionPoints,
         pointsToEarn: quote.loyalty.pointsToEarn,
-        pointValue: moneyDto({ amountMinor: quote.loyalty.program.pointValueMinor, currency: 'ARS' }),
+        pointValue: moneyDto({ amountMinor: quote.loyalty.program.pointValueMinor, currency: BASE_CURRENCY }),
       },
       expiresAt: new Date(Date.now() + 10 * 60 * 1000),
     });
@@ -213,7 +219,7 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
       const quote = await calculateCheckout(tx, input, user.id);
       const expiresAt = new Date(Date.now() + (input.paymentMethod === 'BANK_TRANSFER' ? 24 * 60 * 60 * 1000 : 30 * 60 * 1000));
       const order = await tx.order.create({ data: {
-        userId: user.id, number: publicOrderNumber(), paymentMethod: input.paymentMethod, fulfillmentType: input.fulfillment.type, subtotalMinor: quote.subtotal, shippingMinor: quote.shipping, totalMinor: quote.total, idempotencyKey: key, idempotencyHash: hash, expiresAt,
+        userId: user.id, number: publicOrderNumber(), paymentMethod: input.paymentMethod, fulfillmentType: input.fulfillment.type, currency: BASE_CURRENCY, subtotalMinor: quote.subtotal, shippingMinor: quote.shipping, totalMinor: quote.total, idempotencyKey: key, idempotencyHash: hash, expiresAt,
         loyaltyProgramVersion: quote.loyalty.program.version,
         loyaltySpendPerPointMinor: quote.loyalty.program.spendPerPointMinor,
         loyaltyPointValueMinor: quote.loyalty.program.pointValueMinor,
@@ -224,7 +230,7 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
         ...quote.fulfillmentSnapshot,
         ...(input.fulfillment.type === 'SHIPMENT' ? { shippingRateId: input.fulfillment.shippingRateId, recipientName: input.fulfillment.recipientName, recipientPhone: input.fulfillment.recipientPhone, addressLine1: input.fulfillment.addressLine1, addressLine2: input.fulfillment.addressLine2, city: input.fulfillment.city, province: input.fulfillment.province, postalCode: input.fulfillment.postalCode } : { pickupPointId: input.fulfillment.pickupPointId }),
         items: { create: quote.products.map(({ item, product, line }) => ({ productId: product.id, sku: product.sku, productName: product.name, productSnapshot: JSON.stringify({ ...product, priceMinor: product.priceMinor.toString(), inventory: undefined }), imageFileId: product.images[0]?.fileId ?? null, unitPriceMinor: product.priceMinor, quantity: item.quantity, lineTotalMinor: line })) },
-        payment: { create: { method: input.paymentMethod, amountMinor: quote.total, ...(input.paymentMethod === 'BANK_TRANSFER' ? { transfer: { create: { reference: publicOrderNumber() } } } : { mercadoPago: { create: { expiresAt } } }) } },
+        payment: { create: { method: input.paymentMethod, amountMinor: quote.total, currency: BASE_CURRENCY, ...(input.paymentMethod === 'BANK_TRANSFER' ? { transfer: { create: { reference: publicOrderNumber() } } } : { mercadoPago: { create: { expiresAt } } }) } },
         statusHistory: { create: { toStatus: 'PENDING_PAYMENT', note: 'Order created' } },
       }, include: { items: true, payment: { include: { transfer: true, mercadoPago: true } } } });
       await reserveLoyaltyPoints(tx, user.id, quote.loyalty.pointsRedeemed);
@@ -243,7 +249,10 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
         const preference = await createMercadoPreference(order);
         await prisma.mercadoPagoPayment.update({ where: { paymentId: order.payment!.id }, data: { preferenceId: preference.id ?? null, checkoutUrl: preference.initPoint ?? null } });
         order = await prisma.order.findUniqueOrThrow({ where: { id: order.id }, include: { items: true, payment: { include: { transfer: true, mercadoPago: true } } } });
-      } catch (error) { logger.error({ err: error, orderId: order.id }, 'Mercado Pago preference creation failed'); }
+      } catch (error) {
+        logger.error({ err: error, orderId: order.id }, 'Mercado Pago preference creation failed');
+        if (mercadoPagoUsdUnsupported(error)) throw new AppError(503, 'MERCADOPAGO_USD_UNSUPPORTED', 'Mercado Pago no admite pagos en USD para esta cuenta');
+      }
     }
     return res.status(result.reused ? 200 : 201).json({ order: mapOrder(order), reused: result.reused });
   });

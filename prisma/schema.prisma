@@ -223,10 +223,10 @@ model Admin {
 model LoyaltyProgram {
   id                       String   @id @default("default")
   enabled                  Boolean  @default(true)
-  currency                 String   @default("ARS")
-  spendPerPointMinor       BigInt   @default(30000)
+  currency                 String   @default("USD")
+  spendPerPointMinor       BigInt   @default(300)
   pointsPerStep            Int      @default(1)
-  pointValueMinor          BigInt   @default(1500)
+  pointValueMinor          BigInt   @default(1)
   minimumRedemptionPoints  Int      @default(5)
   maximumRedemptionPercent Int      @default(25)
   version                  Int      @default(1)
@@ -325,7 +325,7 @@ model Product {
   kind          ProductKind
   stockMode     StockMode
   priceMinor    BigInt
-  currency      String                 @default("ARS")
+  currency      String                 @default("USD")
   status        ProductStatus          @default(DRAFT)
   version       Int                    @default(1)
   publishedAt   DateTime?
@@ -425,7 +425,7 @@ model ShippingRate {
   zoneId     String
   name       String
   priceMinor BigInt
-  currency   String       @default("ARS")
+  currency   String       @default("USD")
   active     Boolean      @default(true)
   zone       ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
 
@@ -451,7 +451,7 @@ model Order {
   version                   Int                     @default(1)
   paymentMethod             PaymentMethod
   fulfillmentType           FulfillmentType
-  currency                  String                  @default("ARS")
+  currency                  String                  @default("USD")
   subtotalMinor             BigInt
   shippingMinor             BigInt
   totalMinor                BigInt
@@ -538,7 +538,7 @@ model Payment {
   method            PaymentMethod
   status            PaymentStatus       @default(PENDING)
   amountMinor       BigInt
-  currency          String              @default("ARS")
+  currency          String              @default("USD")
   providerReference String?
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
@@ -613,7 +613,7 @@ model RefundRecord {
   paymentId         String
   fullRefundKey     String?  @unique
   amountMinor       BigInt
-  currency          String   @default("ARS")
+  currency          String   @default("USD")
   reason            String
   externalReference String
   createdAt         DateTime @default(now())

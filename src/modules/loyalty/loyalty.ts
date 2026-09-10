@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { badRequest, conflict } from '../../shared/errors.js';
 import { currentUser, requireUser } from '../../infrastructure/sessions.js';
 import { moneyDto } from '../../shared/money.js';
+import { BASE_CURRENCY } from '../../shared/currency.js';
 
 export const LOYALTY_PROGRAM_ID = 'default';
 
@@ -12,7 +13,7 @@ type LoyaltyDb = PrismaClient | Prisma.TransactionClient;
 export type LoyaltyProgramRecord = {
   id: string;
   enabled: boolean;
-  currency: 'ARS';
+  currency: typeof BASE_CURRENCY;
   spendPerPointMinor: bigint;
   pointsPerStep: number;
   pointValueMinor: bigint;
@@ -27,10 +28,10 @@ export type LoyaltyProgramRecord = {
 const fallbackProgram = (): LoyaltyProgramRecord => ({
   id: LOYALTY_PROGRAM_ID,
   enabled: true,
-  currency: 'ARS',
-  spendPerPointMinor: 30_000n,
+  currency: BASE_CURRENCY,
+  spendPerPointMinor: 300n,
   pointsPerStep: 1,
-  pointValueMinor: 1_500n,
+  pointValueMinor: 1n,
   minimumRedemptionPoints: 5,
   maximumRedemptionPercent: 25,
   version: 1,
@@ -42,8 +43,8 @@ const fallbackProgram = (): LoyaltyProgramRecord => ({
 export async function getLoyaltyProgram(db: LoyaltyDb): Promise<LoyaltyProgramRecord> {
   const program = await db.loyaltyProgram.findUnique({ where: { id: LOYALTY_PROGRAM_ID } });
   if (!program) return fallbackProgram();
-  if (program.currency !== 'ARS') throw conflict('LOYALTY_CURRENCY_INVALID', 'La moneda del programa no coincide con la tienda');
-  return { ...program, currency: 'ARS' };
+  if (program.currency !== BASE_CURRENCY) throw conflict('LOYALTY_CURRENCY_INVALID', 'La moneda del programa no coincide con la tienda');
+  return { ...program, currency: BASE_CURRENCY };
 }
 
 export function mapLoyaltyProgram(program: LoyaltyProgramRecord) {

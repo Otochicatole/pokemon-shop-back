@@ -11,7 +11,7 @@ describe('checkout invariants', () => {
 
   beforeAll(async () => {
     const pickup = await prisma.pickupPoint.create({ data: { name: `Test pickup ${Date.now()}`, address: 'Test address' } });
-    const product = await prisma.product.create({ data: { sku: `TEST-${Date.now()}`, slug: `test-${Date.now()}`, name: 'Test card', description: 'Test', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 1000n, currency: 'ARS', status: 'PUBLISHED', publishedAt: new Date(), inventory: { create: { onHand: 1 } } } });
+    const product = await prisma.product.create({ data: { sku: `TEST-${Date.now()}`, slug: `test-${Date.now()}`, name: 'Test card', description: 'Test', kind: 'SINGLE_CARD', stockMode: 'UNIQUE', priceMinor: 1000n, currency: 'USD', status: 'PUBLISHED', publishedAt: new Date(), inventory: { create: { onHand: 1 } } } });
     productId = product.id;
     const registered = await request(app).post('/api/v2/auth/register').send({ email, password: 'correct horse battery staple', name: 'Buyer' });
     expect(registered.status).toBe(201);

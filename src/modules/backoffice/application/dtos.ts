@@ -8,14 +8,15 @@ import type {
   ProductStatusValue,
   StockModeValue,
 } from '../domain/admin-cms.js';
+import type { BaseCurrency } from '../../../shared/currency.js';
 
-export type MoneyDto = { amountMinor: string; currency: string };
+export type MoneyDto = { amountMinor: string; currency: BaseCurrency };
 export type CursorPageDto<T> = { data: T[]; nextCursor: string | null };
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 export type LoyaltyProgramDto = {
   enabled: boolean;
-  currency: string;
+  currency: BaseCurrency;
   spendPerPoint: MoneyDto;
   pointsPerStep: number;
   pointValue: MoneyDto;

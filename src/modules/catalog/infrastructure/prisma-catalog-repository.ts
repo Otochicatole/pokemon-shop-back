@@ -2,6 +2,7 @@ import type { PrismaClient, Prisma } from '@prisma/client';
 import { ProductStatus } from '@prisma/client';
 import { pokemonTypes, productConditions, type CatalogFacetOption, type CatalogProduct } from '../domain/product.js';
 import type { CatalogQuery, CatalogRepository } from '../application/list-products.js';
+import { BASE_CURRENCY } from '../../../shared/currency.js';
 
 const include = {
   pokemonCard: true,
@@ -18,7 +19,7 @@ const mapProduct = (product: ProductRecord): CatalogProduct => ({
   description: product.description,
   kind: product.kind,
   stockMode: product.stockMode,
-  price: { amountMinor: product.priceMinor.toString(), currency: 'ARS' },
+  price: { amountMinor: product.priceMinor.toString(), currency: BASE_CURRENCY },
   available: Math.max(0, (product.inventory?.onHand ?? 0) - (product.inventory?.reserved ?? 0)),
   productVersion: product.version,
   pokemonCard: product.pokemonCard ? {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BASE_CURRENCY } from '../../../shared/currency.js';
 import {
   orderStatuses, paymentMethods, paymentStatuses, pokemonTypes, productConditions,
   productKinds, productStatuses, stockModes,
@@ -7,7 +8,7 @@ import {
 const dateTime = z.string().datetime();
 const nullableDateTime = dateTime.nullable();
 
-export const adminMoneySchema = z.object({ amountMinor: z.string().regex(/^\d+$/), currency: z.string().min(3).max(3) });
+export const adminMoneySchema = z.object({ amountMinor: z.string().regex(/^\d+$/), currency: z.literal(BASE_CURRENCY) });
 export const adminMetaSchema = z.object({ nextCursor: z.string().nullable().optional() });
 export const adminEnvelopeSchema = <T extends z.ZodTypeAny>(data: T) => z.object({ data, meta: adminMetaSchema });
 
@@ -16,7 +17,7 @@ export const adminLoyaltyAccountSchema = z.object({
   lifetimeEarned: z.number().int().nonnegative(), lifetimeRedeemed: z.number().int().nonnegative(),
 });
 export const adminLoyaltyProgramSchema = z.object({
-  enabled: z.boolean(), currency: z.literal('ARS'), spendPerPoint: adminMoneySchema,
+  enabled: z.boolean(), currency: z.literal(BASE_CURRENCY), spendPerPoint: adminMoneySchema,
   pointsPerStep: z.number().int().positive(), pointValue: adminMoneySchema,
   minimumRedemptionPoints: z.number().int().positive(), maximumRedemptionPercent: z.number().int().min(1).max(90),
   version: z.number().int().positive(), updatedAt: dateTime,

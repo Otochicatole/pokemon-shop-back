@@ -37,7 +37,7 @@ describe('loyalty purchase lifecycle', () => {
       where: { id: 'default' },
       update: {
         enabled: true,
-        currency: 'ARS',
+        currency: 'USD',
         spendPerPointMinor: 100n,
         pointsPerStep: 1,
         pointValueMinor: 100n,
@@ -48,7 +48,7 @@ describe('loyalty purchase lifecycle', () => {
       create: {
         id: 'default',
         enabled: true,
-        currency: 'ARS',
+        currency: 'USD',
         spendPerPointMinor: 100n,
         pointsPerStep: 1,
         pointValueMinor: 100n,
@@ -68,7 +68,7 @@ describe('loyalty purchase lifecycle', () => {
         kind: 'ACCESSORY',
         stockMode: 'QUANTITY',
         priceMinor: 2_000n,
-        currency: 'ARS',
+        currency: 'USD',
         status: 'PUBLISHED',
         publishedAt: new Date(),
         inventory: { create: { onHand: 1 } },
@@ -144,9 +144,9 @@ describe('loyalty purchase lifecycle', () => {
       status: 'PENDING_PAYMENT',
       loyalty: expect.objectContaining({ pointsRedeemed: 5, pointsEarned: 15, redemptionStatus: 'RESERVED' }),
       totals: expect.objectContaining({
-        subtotal: { amountMinor: '2000', currency: 'ARS' },
-        discount: { amountMinor: '500', currency: 'ARS' },
-        total: { amountMinor: '1500', currency: 'ARS' },
+        subtotal: { amountMinor: '2000', currency: 'USD' },
+        discount: { amountMinor: '500', currency: 'USD' },
+        total: { amountMinor: '1500', currency: 'USD' },
       }),
     }));
     orderId = checkout.body.data.order.id;
@@ -185,7 +185,7 @@ describe('loyalty purchase lifecycle', () => {
     ]));
 
     const refunded = await cms.payments.recordFullRefund(actor, orderNumber, 2, 'Full loyalty refund', `LOYALTY-REFUND-${fixture}`);
-    expect(refunded).toEqual(expect.objectContaining({ status: 'REFUND_RECORDED', version: 3, amount: { amountMinor: '1500', currency: 'ARS' } }));
+    expect(refunded).toEqual(expect.objectContaining({ status: 'REFUND_RECORDED', version: 3, amount: { amountMinor: '1500', currency: 'USD' } }));
 
     expect(await prisma.loyaltyAccount.findUniqueOrThrow({ where: { userId } })).toEqual(expect.objectContaining({ balance: 5, reserved: 0 }));
     expect(await prisma.order.findUniqueOrThrow({ where: { id: orderId }, include: { payment: true } })).toEqual(expect.objectContaining({
@@ -220,7 +220,7 @@ describe('loyalty purchase lifecycle', () => {
         status: 'PAID',
         paymentMethod: 'MERCADO_PAGO',
         fulfillmentType: 'PICKUP',
-        currency: 'ARS',
+        currency: 'USD',
         subtotalMinor: 1_900n,
         shippingMinor: 0n,
         totalMinor: 1_500n,
@@ -238,7 +238,7 @@ describe('loyalty purchase lifecycle', () => {
             method: 'MERCADO_PAGO',
             status: 'APPROVED',
             amountMinor: 1_500n,
-            currency: 'ARS',
+            currency: 'USD',
             mercadoPago: { create: { status: 'approved' } },
           },
         },
@@ -259,7 +259,7 @@ describe('loyalty purchase lifecycle', () => {
     const getPayment = vi.spyOn(MercadoPayment.prototype, 'get').mockResolvedValue({
       external_reference: number,
       transaction_amount: 15,
-      currency_id: 'ARS',
+      currency_id: 'USD',
       status: 'refunded',
       status_detail: 'refunded',
     } as never);

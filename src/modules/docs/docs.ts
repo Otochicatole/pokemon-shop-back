@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import swaggerUi from 'swagger-ui-express';
 import { z } from 'zod';
+import { BASE_CURRENCY } from '../../shared/currency.js';
 import { extendZodWithOpenApi, OpenAPIRegistry, OpenApiGeneratorV31 } from '@asteasolutions/zod-to-openapi';
 import { env } from '../../config/env.js';
 import { requireAdmin } from '../../infrastructure/sessions.js';
@@ -52,7 +53,7 @@ const orderInputSchema = z.object({
 const checkoutOptionsSchema = z.object({ fulfillment: z.object({ shippingZones: z.array(z.object({ id: z.string().uuid(), name: z.string(), provinces: z.array(z.string()), rates: z.array(z.object({ id: z.string().uuid(), name: z.string(), price: moneySchema })) })), pickupPoints: z.array(z.object({ id: z.string().uuid(), name: z.string(), address: z.string() })) }), paymentMethods: z.object({ BANK_TRANSFER: z.boolean(), MERCADO_PAGO: z.boolean() }) });
 const loyaltyProgramSchema = z.object({
   enabled: z.boolean(),
-  currency: z.literal('ARS'),
+  currency: z.literal(BASE_CURRENCY),
   spendPerPoint: moneySchema,
   pointsPerStep: z.number().int().positive(),
   pointValue: moneySchema,
@@ -148,6 +149,7 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
     401: { description: 'Customer session missing or expired', content: { 'application/json': { schema: problemSchema } } },
     403: { description: 'Email verification or CSRF requirement not met', content: { 'application/json': { schema: problemSchema } } },
     409: { description: 'Product, stock or loyalty balance changed', content: { 'application/json': { schema: problemSchema } } },
+    503: { description: 'Payment provider is not configured or does not support USD', content: { 'application/json': { schema: problemSchema } } },
   };
 
   registry.registerPath({

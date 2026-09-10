@@ -1,3 +1,5 @@
+import type { BaseCurrency } from '../../../shared/currency.js';
+
 export const productKinds = ['SINGLE_CARD', 'SEALED_PRODUCT', 'ACCESSORY'] as const;
 export type CatalogProductKind = (typeof productKinds)[number];
 
@@ -46,7 +48,7 @@ export interface CatalogProduct {
   description: string;
   kind: CatalogProductKind;
   stockMode: 'UNIQUE' | 'QUANTITY';
-  price: { amountMinor: string; currency: 'ARS' };
+  price: { amountMinor: string; currency: BaseCurrency };
   available: number;
   productVersion: number;
   pokemonCard: CatalogPokemonCard | null;

@@ -9,11 +9,13 @@ import type {
 } from '../domain/admin-cms.js';
 import { allowedOrderTransitions } from '../domain/admin-cms.js';
 import { getLoyaltyProgram, mapLoyaltyProgram, releaseOrderLoyaltyReservation, reverseOrderLoyalty, settleOrderLoyalty } from '../../loyalty/index.js';
+import { BASE_CURRENCY } from '../../../shared/currency.js';
+import type { BaseCurrency } from '../../../shared/currency.js';
 
 type Coordinator = { run<T>(operation: () => Promise<T>): Promise<T> };
 type Db = PrismaClient | Prisma.TransactionClient;
 
-const money = (amountMinor: bigint, currency = 'ARS') => ({ amountMinor: amountMinor.toString(), currency });
+const money = (amountMinor: bigint, currency: BaseCurrency = BASE_CURRENCY) => ({ amountMinor: amountMinor.toString(), currency });
 const RETIRED_IMAGE_GRACE_MS = 24 * 60 * 60 * 1000;
 const page = <T>(rows: readonly T[], limit: number, id: (value: T) => string) => {
   const hasMore = rows.length > limit;
@@ -62,7 +64,7 @@ function mapProduct(value: ProductRecord) {
   return {
     id: value.id, sku: value.sku, slug: value.slug, name: value.name, description: value.description,
     kind: value.kind, stockMode: value.stockMode, status: value.status, version: value.version,
-    price: money(value.priceMinor, value.currency),
+    price: money(value.priceMinor),
     inventory: value.inventory ? { onHand: value.inventory.onHand, reserved: value.inventory.reserved, available, version: value.inventory.version } : null,
     pokemonCard: value.pokemonCard,
     images: value.images.map((image) => ({ id: image.id, fileId: image.fileId, url: `/media/public/${image.fileId}`, altText: image.altText, sortOrder: image.sortOrder, createdAt: image.createdAt })),
@@ -103,30 +105,30 @@ function mapOrder(value: OrderRecord): OrderDto {
   return {
     id: value.id, number: value.number, version: value.version, status: value.status,
     paymentMethod: value.paymentMethod, fulfillmentType: value.fulfillmentType,
-    totals: { subtotal: money(value.subtotalMinor, value.currency), discount: money(value.pointsDiscountMinor, value.currency), shipping: money(value.shippingMinor, value.currency), total: money(value.totalMinor, value.currency) },
+    totals: { subtotal: money(value.subtotalMinor), discount: money(value.pointsDiscountMinor), shipping: money(value.shippingMinor), total: money(value.totalMinor) },
     loyalty: {
       programVersion: value.loyaltyProgramVersion,
       pointsRedeemed: value.pointsRedeemed,
-      pointsDiscount: money(value.pointsDiscountMinor, value.currency),
+      pointsDiscount: money(value.pointsDiscountMinor),
       pointsEarned: value.pointsEarned,
       redemptionStatus: value.loyaltyRedemptionStatus,
-      spendPerPoint: value.loyaltySpendPerPointMinor === null ? null : money(value.loyaltySpendPerPointMinor, value.currency),
-      pointValue: value.loyaltyPointValueMinor === null ? null : money(value.loyaltyPointValueMinor, value.currency),
+      spendPerPoint: value.loyaltySpendPerPointMinor === null ? null : money(value.loyaltySpendPerPointMinor),
+      pointValue: value.loyaltyPointValueMinor === null ? null : money(value.loyaltyPointValueMinor),
     },
     customer: value.user,
     fulfillment: value.fulfillmentType === 'SHIPMENT' ? {
       type: 'SHIPMENT', shippingRateId: value.shippingRateId, zoneName: value.shippingZoneName,
-      rateName: value.shippingRateName, ratePrice: value.shippingRatePriceMinor === null ? null : money(value.shippingRatePriceMinor, value.currency),
+      rateName: value.shippingRateName, ratePrice: value.shippingRatePriceMinor === null ? null : money(value.shippingRatePriceMinor),
       recipientName: value.recipientName, recipientPhone: value.recipientPhone, addressLine1: value.addressLine1,
       addressLine2: value.addressLine2, city: value.city, province: value.province, postalCode: value.postalCode,
     } : { type: 'PICKUP', pickupPointId: value.pickupPointId, name: value.pickupPointName, address: value.pickupPointAddress },
-    items: value.items.map((item) => ({ id: item.id, productId: item.productId, sku: item.sku, name: item.productName, imageFileId: item.imageFileId, imageUrl: item.imageFileId ? `/media/public/${item.imageFileId}` : null, unitPrice: money(item.unitPriceMinor, value.currency), quantity: item.quantity, lineTotal: money(item.lineTotalMinor, value.currency), snapshot: parseJson(item.productSnapshot) })),
+    items: value.items.map((item) => ({ id: item.id, productId: item.productId, sku: item.sku, name: item.productName, imageFileId: item.imageFileId, imageUrl: item.imageFileId ? `/media/public/${item.imageFileId}` : null, unitPrice: money(item.unitPriceMinor), quantity: item.quantity, lineTotal: money(item.lineTotalMinor), snapshot: parseJson(item.productSnapshot) })),
     reservations: value.reservations.map((reservation) => ({ id: reservation.id, productId: reservation.productId, quantity: reservation.quantity, expiresAt: reservation.expiresAt, releasedAt: reservation.releasedAt, consumedAt: reservation.consumedAt })),
     payment: value.payment ? {
-      id: value.payment.id, method: value.payment.method, status: value.payment.status, amount: money(value.payment.amountMinor, value.payment.currency), providerReference: value.payment.providerReference,
+      id: value.payment.id, method: value.payment.method, status: value.payment.status, amount: money(value.payment.amountMinor), providerReference: value.payment.providerReference,
       bankTransfer: value.payment.transfer,
       mercadoPago: value.payment.mercadoPago,
-      refunds: value.payment.refunds.map((refund) => ({ id: refund.id, amount: money(refund.amountMinor, refund.currency), reason: refund.reason, externalReference: refund.externalReference, createdAt: refund.createdAt })),
+      refunds: value.payment.refunds.map((refund) => ({ id: refund.id, amount: money(refund.amountMinor), reason: refund.reason, externalReference: refund.externalReference, createdAt: refund.createdAt })),
     } : null,
     receipts: value.transferReceipts.map((receipt) => ({ id: receipt.id, fileId: receipt.fileId, url: `/media/private/${receipt.fileId}`, review: receipt.review, note: receipt.note, createdAt: receipt.createdAt, reviewedAt: receipt.reviewedAt, reviewedById: receipt.reviewedById })),
     timeline: value.statusHistory,
@@ -183,7 +185,7 @@ export class PrismaAdminCmsTransactionStore {
         lowStock: inventories.filter((value) => value.onHand - value.reserved > 0 && value.onHand - value.reserved <= 5).length,
       },
       attention: { transferReviews: pendingTransfers, mercadoPagoReviews: mercadoReview },
-      recentOrders: recentOrders.map((order) => ({ id: order.id, number: order.number, status: order.status, total: money(order.totalMinor, order.currency), createdAt: order.createdAt })),
+      recentOrders: recentOrders.map((order) => ({ id: order.id, number: order.number, status: order.status, total: money(order.totalMinor), createdAt: order.createdAt })),
       recentActivity: recentActivity.map((entry) => ({ ...entry, metadata: redact(parseJson(entry.metadata ?? 'null')) })),
     };
   }
@@ -216,7 +218,7 @@ export class PrismaAdminCmsTransactionStore {
     return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({ data: {
         sku: input.sku.toUpperCase(), slug: input.slug, name: input.name, description: input.description,
-        kind: input.kind, stockMode: input.stockMode, priceMinor: parseMinor(input.priceMinor), currency: 'ARS',
+        kind: input.kind, stockMode: input.stockMode, priceMinor: parseMinor(input.priceMinor), currency: BASE_CURRENCY,
         inventory: { create: { onHand: input.initialStock ?? 0, reserved: 0 } },
         ...(input.pokemonCard ? { pokemonCard: { create: mapCardWrite(input.pokemonCard) } } : {}),
       }, include: productInclude });
@@ -524,13 +526,13 @@ export class PrismaAdminCmsTransactionStore {
       const order = await tx.order.findUnique({ where: { number }, include: { payment: { include: { refunds: true } } } });
       if (!order?.payment) throw notFound('Order not found');
       if (!['APPROVED', 'REQUIRES_REVIEW'].includes(order.payment.status) || order.payment.refunds.length) throw conflict('ORDER_NOT_REFUNDABLE', 'Order does not have a refundable payment');
-      const refund = await tx.refundRecord.create({ data: { paymentId: order.payment.id, fullRefundKey: order.payment.id, amountMinor: order.payment.amountMinor, currency: order.payment.currency, reason, externalReference, createdById: actor.adminId } });
+      const refund = await tx.refundRecord.create({ data: { paymentId: order.payment.id, fullRefundKey: order.payment.id, amountMinor: order.payment.amountMinor, currency: BASE_CURRENCY, reason, externalReference, createdById: actor.adminId } });
       await tx.payment.update({ where: { id: order.payment.id }, data: { status: 'REFUNDED' } });
       await updateOrderVersion(tx, order.id, expectedVersion, { status: 'REFUND_RECORDED' });
       await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'REFUND_RECORDED', note: `Full refund recorded: ${reason}`, changedById: actor.adminId } });
       await reverseOrderLoyalty(tx, order.id);
       await tx.auditLog.create({ data: auditData(actor, 'FULL_REFUND_RECORDED', 'Order', order.id, { number, refundId: refund.id, externalReference }) });
-      return { refundId: refund.id, number, status: 'REFUND_RECORDED', amount: money(refund.amountMinor, refund.currency), version: expectedVersion + 1 };
+      return { refundId: refund.id, number, status: 'REFUND_RECORDED', amount: money(refund.amountMinor, BASE_CURRENCY), version: expectedVersion + 1 };
     }));
   }
 
@@ -582,7 +584,7 @@ export class PrismaAdminCmsTransactionStore {
   createShippingZone(actor: AdminActor, input: ShippingZoneWrite) {
     return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
       await assertProvincesAvailable(tx, input.provinces, undefined, input.active);
-      const zone = await tx.shippingZone.create({ data: { name: input.name, active: input.active, provinces: { create: normalizedProvinces(input.provinces).map((province) => ({ province })) }, rates: { create: input.rates.map((rate) => ({ name: rate.name, priceMinor: parseMinor(rate.priceMinor), currency: 'ARS', active: rate.active })) } }, include: { provinces: true, rates: true } });
+      const zone = await tx.shippingZone.create({ data: { name: input.name, active: input.active, provinces: { create: normalizedProvinces(input.provinces).map((province) => ({ province })) }, rates: { create: input.rates.map((rate) => ({ name: rate.name, priceMinor: parseMinor(rate.priceMinor), currency: BASE_CURRENCY, active: rate.active })) } }, include: { provinces: true, rates: true } });
       await tx.auditLog.create({ data: auditData(actor, 'SHIPPING_ZONE_CREATED', 'ShippingZone', zone.id, { name: zone.name }) });
       return { shippingZone: mapZone(zone) };
     }));
@@ -602,7 +604,7 @@ export class PrismaAdminCmsTransactionStore {
         if (rate.id) {
           const changed = await tx.shippingRate.updateMany({ where: { id: rate.id, zoneId: id }, data: { name: rate.name, priceMinor: parseMinor(rate.priceMinor), active: rate.active } });
           if (changed.count !== 1) throw badRequest('INVALID_SHIPPING_RATE', 'Shipping rate does not belong to the zone');
-        } else await tx.shippingRate.create({ data: { zoneId: id, name: rate.name, priceMinor: parseMinor(rate.priceMinor), currency: 'ARS', active: rate.active } });
+        } else await tx.shippingRate.create({ data: { zoneId: id, name: rate.name, priceMinor: parseMinor(rate.priceMinor), currency: BASE_CURRENCY, active: rate.active } });
       }
       await tx.auditLog.create({ data: auditData(actor, 'SHIPPING_ZONE_UPDATED', 'ShippingZone', id, { name: input.name, active: input.active }) });
       const zone = await tx.shippingZone.findUniqueOrThrow({ where: { id }, include: { provinces: true, rates: true } });
@@ -801,5 +803,5 @@ async function assertProvincesAvailable(tx: Db, provinces: readonly string[], ex
 }
 
 function mapZone<T extends { id: string; name: string; active: boolean; createdAt: Date; updatedAt: Date; provinces: readonly { province: string }[]; rates: readonly { id: string; name: string; priceMinor: bigint; currency: string; active: boolean }[] }>(zone: T) {
-  return { id: zone.id, name: zone.name, active: zone.active, provinces: zone.provinces.map((value) => value.province), rates: zone.rates.map((rate) => ({ id: rate.id, name: rate.name, price: money(rate.priceMinor, rate.currency), active: rate.active })), createdAt: zone.createdAt, updatedAt: zone.updatedAt };
+  return { id: zone.id, name: zone.name, active: zone.active, provinces: zone.provinces.map((value) => value.province), rates: zone.rates.map((rate) => ({ id: rate.id, name: rate.name, price: money(rate.priceMinor), active: rate.active })), createdAt: zone.createdAt, updatedAt: zone.updatedAt };
 }

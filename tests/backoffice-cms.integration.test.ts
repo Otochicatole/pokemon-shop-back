@@ -94,7 +94,7 @@ describe('backoffice CMS invariants', () => {
         language: 'ES', condition: 'NM', finish: null,
       },
     });
-    expect(updated.product).toEqual(expect.objectContaining({ version: 2, price: { amountMinor: '13000', currency: 'ARS' } }));
+    expect(updated.product).toEqual(expect.objectContaining({ version: 2, price: { amountMinor: '13000', currency: 'USD' } }));
     expect(updated.product.pokemonCard).toEqual(expect.objectContaining({ setCode: null, finish: null }));
     await expect(cms.products.update(actor, created.product.id, { expectedVersion: 1, name: 'Stale' })).rejects.toMatchObject({ code: 'PRODUCT_CHANGED', status: 409 });
     await expect(cms.inventory.adjust(actor, created.product.id, 1, 'Would exceed unique stock')).rejects.toMatchObject({ code: 'UNIQUE_STOCK_INVALID', status: 400 });
@@ -199,12 +199,12 @@ describe('backoffice CMS invariants', () => {
     await cms.orders.transition(actor, orderNumber, 2, 'PREPARING');
     await expect(cms.orders.transition(actor, orderNumber, 3, 'SHIPPED')).rejects.toMatchObject({ code: 'INVALID_FULFILLMENT_TRANSITION' });
     const refunded = await cms.payments.recordFullRefund(actor, orderNumber, 3, 'External bank refund', `BANK-${randomUUID()}`);
-    expect(refunded).toEqual(expect.objectContaining({ amount: { amountMinor: '13000', currency: 'ARS' }, status: 'REFUND_RECORDED' }));
+    expect(refunded).toEqual(expect.objectContaining({ amount: { amountMinor: '13000', currency: 'USD' }, status: 'REFUND_RECORDED' }));
     await expect(cms.payments.recordFullRefund(actor, orderNumber, 4, 'Duplicate', `BANK-${randomUUID()}`)).rejects.toMatchObject({ code: 'ORDER_NOT_REFUNDABLE' });
     expect((await prisma.inventory.findUniqueOrThrow({ where: { productId } })).onHand).toBe(0);
     const customer = await cms.customers.get(userId);
     expect(customer.customer.ordersCount).toBeGreaterThanOrEqual(2);
-    expect(customer.customer.paidTotal).toEqual({ amountMinor: '13000', currency: 'ARS' });
+    expect(customer.customer.paidTotal).toEqual({ amountMinor: '13000', currency: 'USD' });
     expect(customer.customer.orders.length).toBeLessThanOrEqual(20);
     expect((await cms.customers.listOrders(userId, undefined, 1)).data).toHaveLength(1);
     expect(await prisma.auditLog.count({ where: { actorId: adminId } })).toBeGreaterThanOrEqual(5);
