@@ -15,6 +15,19 @@ export const ADMIN_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 export const ADMIN_ABSOLUTE_TIMEOUT_MS = 8 * 60 * 60 * 1000;
 const ADMIN_LAST_SEEN_UPDATE_INTERVAL_MS = 60 * 1000;
 
+export type SessionRevocation = {
+  actorType: 'USER' | 'ADMIN';
+  actorId: string;
+  sessionId: string;
+};
+
+export type SessionRevocationHandler = (revocation: SessionRevocation) => void;
+
+type AdminSessionLookupOptions = {
+  touch?: boolean;
+  onSessionRevoked?: SessionRevocationHandler;
+};
+
 const cookieOptions = (httpOnly: boolean) => ({
   httpOnly,
   secure: env.cookieSecure,
@@ -29,7 +42,13 @@ const validHash = (raw: string, hash: string): boolean => {
   return expected.length === actual.length && timingSafeEqual(expected, actual);
 };
 
-export async function createUserSession(userId: string, response: Response, request: Request) {
+export async function createUserSession(
+  userId: string,
+  response: Response,
+  request: Request,
+  onSessionRevoked?: SessionRevocationHandler,
+) {
+  await revokeUserSession(request, response, onSessionRevoked, false);
   const token = randomToken(32);
   const csrf = randomToken(32);
   const now = new Date();
@@ -47,7 +66,13 @@ export async function createUserSession(userId: string, response: Response, requ
   return { id: session.id, csrfToken: csrf };
 }
 
-export async function createAdminSession(adminId: string, response: Response, request: Request) {
+export async function createAdminSession(
+  adminId: string,
+  response: Response,
+  request: Request,
+  onSessionRevoked?: SessionRevocationHandler,
+) {
+  await revokeAdminSession(request, response, onSessionRevoked, false);
   const token = randomToken(32);
   const csrf = randomToken(32);
   const now = new Date();
@@ -65,35 +90,72 @@ export async function createAdminSession(adminId: string, response: Response, re
   return { id: session.id, csrfToken: csrf };
 }
 
-export async function revokeUserSession(request: Request, response: Response) {
+export async function revokeUserSession(
+  request: Request,
+  response: Response,
+  onSessionRevoked?: SessionRevocationHandler,
+  clearCookies = true,
+) {
   const token = request.cookies?.[USER_COOKIE] as string | undefined;
-  if (token) await prisma.userSession.updateMany({ where: { tokenHash: sha256(token), revokedAt: null }, data: { revokedAt: new Date() } });
-  response.clearCookie(USER_COOKIE, cookieOptions(true));
-  response.clearCookie(USER_CSRF_COOKIE, cookieOptions(false));
-}
-
-export async function revokeAdminSession(request: Request, response: Response) {
-  const token = request.cookies?.[ADMIN_COOKIE] as string | undefined;
-  if (token) {
-    await writeCoordinator.run(() => prisma.adminSession.updateMany({
-      where: { tokenHash: sha256(token), revokedAt: null },
+  const revocation = token ? await writeCoordinator.run(async () => {
+    const session = await prisma.userSession.findUnique({
+      where: { tokenHash: sha256(token) },
+      select: { id: true, userId: true },
+    });
+    if (!session) return null;
+    await prisma.userSession.updateMany({
+      where: { id: session.id, revokedAt: null },
       data: { revokedAt: new Date() },
-    }));
+    });
+    return { actorType: 'USER' as const, actorId: session.userId, sessionId: session.id };
+  }) : null;
+  if (revocation) onSessionRevoked?.(revocation);
+  if (clearCookies) {
+    response.clearCookie(USER_COOKIE, cookieOptions(true));
+    response.clearCookie(USER_CSRF_COOKIE, cookieOptions(false));
   }
-  response.clearCookie(ADMIN_COOKIE, cookieOptions(true));
-  response.clearCookie(ADMIN_CSRF_COOKIE, cookieOptions(false));
+  return revocation;
 }
 
-export async function getUserSession(request: Request) {
-  const token = request.cookies?.[USER_COOKIE] as string | undefined;
+export async function revokeAdminSession(
+  request: Request,
+  response: Response,
+  onSessionRevoked?: SessionRevocationHandler,
+  clearCookies = true,
+) {
+  const token = request.cookies?.[ADMIN_COOKIE] as string | undefined;
+  const revocation = token ? await writeCoordinator.run(async () => {
+    const session = await prisma.adminSession.findUnique({
+      where: { tokenHash: sha256(token) },
+      select: { id: true, adminId: true },
+    });
+    if (!session) return null;
+    await prisma.adminSession.updateMany({
+      where: { id: session.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return { actorType: 'ADMIN' as const, actorId: session.adminId, sessionId: session.id };
+  }) : null;
+  if (revocation) onSessionRevoked?.(revocation);
+  if (clearCookies) {
+    response.clearCookie(ADMIN_COOKIE, cookieOptions(true));
+    response.clearCookie(ADMIN_CSRF_COOKIE, cookieOptions(false));
+  }
+  return revocation;
+}
+
+export async function getUserSessionByToken(token: string | undefined) {
   if (!token) return null;
   const session = await prisma.userSession.findUnique({ where: { tokenHash: sha256(token) }, include: { user: true } });
   if (!session || session.revokedAt || session.expiresAt <= new Date() || session.user.status !== 'ACTIVE') return null;
   return session;
 }
 
-export async function getAdminSession(request: Request) {
-  const token = request.cookies?.[ADMIN_COOKIE] as string | undefined;
+export async function getUserSession(request: Request) {
+  return getUserSessionByToken(request.cookies?.[USER_COOKIE] as string | undefined);
+}
+
+export async function getAdminSessionByToken(token: string | undefined, options: AdminSessionLookupOptions = { touch: false }) {
   if (!token) return null;
   const session = await prisma.adminSession.findUnique({ where: { tokenHash: sha256(token) }, include: { admin: true } });
   if (!session) return null;
@@ -113,11 +175,12 @@ export async function getAdminSession(request: Request) {
         data: { revokedAt: now },
       }));
     }
+    options.onSessionRevoked?.({ actorType: 'ADMIN', actorId: session.adminId, sessionId: session.id });
     return null;
   }
 
   const touchCutoff = new Date(now.getTime() - ADMIN_LAST_SEEN_UPDATE_INTERVAL_MS);
-  if (session.lastSeenAt <= touchCutoff) {
+  if (options.touch === true && session.lastSeenAt <= touchCutoff) {
     await writeCoordinator.run(() => prisma.adminSession.updateMany({
       where: {
         id: session.id,
@@ -132,6 +195,10 @@ export async function getAdminSession(request: Request) {
   return session;
 }
 
+export async function getAdminSession(request: Request, options: AdminSessionLookupOptions = { touch: false }) {
+  return getAdminSessionByToken(request.cookies?.[ADMIN_COOKIE] as string | undefined, options);
+}
+
 export async function requireUser(request: Request, _response: Response, next: NextFunction) {
   const session = currentUser(request) ?? await getUserSession(request);
   if (!session) return next(unauthorized());
@@ -140,7 +207,7 @@ export async function requireUser(request: Request, _response: Response, next: N
 }
 
 export async function requireAdmin(request: Request, _response: Response, next: NextFunction) {
-  const session = currentAdmin(request) ?? await getAdminSession(request);
+  const session = currentAdmin(request) ?? await getAdminSession(request, { touch: false });
   if (!session) return next(unauthorized());
   resLocals(request).adminSession = session;
   return next();
@@ -193,6 +260,39 @@ type SessionNamespace = 'user' | 'admin';
 function requestSessionNamespace(request: Request): SessionNamespace {
   const pathname = request.originalUrl.split('?', 1)[0] ?? request.path;
   return /^\/api\/v\d+\/admin(?:\/|$)/.test(pathname) ? 'admin' : 'user';
+}
+
+/**
+ * Records administrator activity only for authenticated state-changing requests.
+ * It must run after Origin and CSRF validation so background GET polling can never
+ * extend an idle session and an untrusted cross-site request cannot touch it.
+ */
+export async function touchAdminSessionForMutation(request: Request, _response: Response, next: NextFunction) {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(request.method) || requestSessionNamespace(request) !== 'admin') return next();
+  const session = currentAdmin(request);
+  if (!session) return next();
+  try {
+    const now = new Date();
+    const touchCutoff = new Date(now.getTime() - ADMIN_LAST_SEEN_UPDATE_INTERVAL_MS);
+    if (session.lastSeenAt > touchCutoff) return next();
+    const updated = await writeCoordinator.run(() => prisma.adminSession.updateMany({
+      where: {
+        id: session.id,
+        revokedAt: null,
+        expiresAt: { gt: now },
+        lastSeenAt: {
+          gt: new Date(now.getTime() - ADMIN_IDLE_TIMEOUT_MS),
+          lte: touchCutoff,
+        },
+      },
+      data: { lastSeenAt: now },
+    }));
+    if (updated.count !== 1) return next(unauthorized());
+    session.lastSeenAt = now;
+    return next();
+  } catch (error) {
+    return next(error);
+  }
 }
 
 /** Rotates only the CSRF token belonging to the route namespace. */

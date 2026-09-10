@@ -189,28 +189,48 @@ describe('admin session and CSRF isolation', () => {
     expect(invalidSessions.every((session) => session.revokedAt !== null)).toBe(true);
   });
 
-  it('touches an active admin session without extending its absolute expiry', async () => {
+  it('keeps polling reads activity-neutral and touches only a CSRF-protected mutation', async () => {
     const token = `active-${randomUUID()}`;
+    const csrf = `csrf-${token}`;
     const originalLastSeenAt = new Date(Date.now() - 2 * 60 * 1000);
     const absoluteExpiry = new Date(Date.now() + 60 * 60 * 1000);
     await prisma.adminSession.create({
       data: {
         adminId,
         tokenHash: sha256(token),
-        csrfHash: sha256(`csrf-${token}`),
+        csrfHash: sha256(csrf),
         lastSeenAt: originalLastSeenAt,
         expiresAt: absoluteExpiry,
       },
     });
 
-    const response = await request(app)
-      .get('/api/v2/admin/auth/me')
-      .set('Cookie', cookieHeader([ADMIN_COOKIE, token]));
-    expect(response.status).toBe(200);
+    const pollingResponses = await Promise.all([
+      request(app).get('/api/v2/admin/auth/me').set('Cookie', cookieHeader([ADMIN_COOKIE, token])),
+      request(app).get('/api/v2/admin/support/unread-count').set('Cookie', cookieHeader([ADMIN_COOKIE, token])),
+      request(app).get('/api/v2/admin/dashboard?range=7D').set('Cookie', cookieHeader([ADMIN_COOKIE, token])),
+    ]);
+    expect(pollingResponses.map((response) => response.status)).toEqual([200, 200, 200]);
+
+    const rejectedMutation = await request(app)
+      .post('/api/v2/admin/auth/logout')
+      .set('Cookie', cookieHeader([ADMIN_COOKIE, token]))
+      .set('X-CSRF-Token', 'invalid-csrf-token');
+    expect(rejectedMutation.status).toBe(403);
+
+    const untouched = await prisma.adminSession.findUniqueOrThrow({ where: { tokenHash: sha256(token) } });
+    expect(untouched.lastSeenAt.getTime()).toBe(originalLastSeenAt.getTime());
+    expect(untouched.expiresAt.getTime()).toBe(absoluteExpiry.getTime());
+
+    const mutation = await request(app)
+      .post('/api/v2/admin/auth/logout')
+      .set('Cookie', cookieHeader([ADMIN_COOKIE, token]))
+      .set('X-CSRF-Token', csrf);
+    expect(mutation.status).toBe(204);
 
     const touched = await prisma.adminSession.findUniqueOrThrow({ where: { tokenHash: sha256(token) } });
     expect(touched.lastSeenAt.getTime()).toBeGreaterThan(originalLastSeenAt.getTime());
     expect(touched.expiresAt.getTime()).toBe(absoluteExpiry.getTime());
+    expect(touched.revokedAt).not.toBeNull();
   });
 
   it('does not keep an admin session alive while browsing the storefront', async () => {
@@ -246,6 +266,7 @@ describe('admin session and CSRF isolation', () => {
     expect(response.body.paths).toHaveProperty('/api/v2/admin/auth/login');
     expect(response.body.paths).toHaveProperty('/api/v2/admin/auth/csrf');
     expect(response.body.paths['/api/v2/admin/auth/csrf'].get.security).toEqual([{ adminCookie: [] }]);
+    expect(response.body.paths['/api/v2/admin/auth/me'].get.description).toContain('without extending');
 
     const loginSchema = response.body.paths['/api/v2/admin/auth/login'].post.requestBody
       .content['application/json'].schema;

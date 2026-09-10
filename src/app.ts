@@ -9,7 +9,14 @@ import { prisma } from './infrastructure/prisma.js';
 import { logger } from './infrastructure/logger.js';
 import { env } from './config/env.js';
 import { AppError } from './shared/errors.js';
-import { ADMIN_COOKIE, csrfProtection, getAdminSession, getUserSession, USER_COOKIE } from './infrastructure/sessions.js';
+import {
+  ADMIN_COOKIE,
+  csrfProtection,
+  getAdminSession,
+  getUserSession,
+  touchAdminSessionForMutation,
+  USER_COOKIE,
+} from './infrastructure/sessions.js';
 import { rateLimit } from './infrastructure/rate-limit.js';
 import { createCompositionRoot } from './app/composition-root.js';
 import { responseEnvelopeV2 } from './app/http/middleware/response-envelope.js';
@@ -34,7 +41,12 @@ export function createApp(composition = createCompositionRoot()): Express {
       const isPrivateMedia = req.path.startsWith('/media/private');
       if ((!isAdminApi || isPrivateMedia) && req.cookies?.[USER_COOKIE]) context.userSession = await getUserSession(req);
       const needsAdminContext = isAdminApi || isPrivateMedia;
-      if (needsAdminContext && req.cookies?.[ADMIN_COOKIE]) context.adminSession = await getAdminSession(req);
+      if (needsAdminContext && req.cookies?.[ADMIN_COOKIE]) {
+        context.adminSession = await getAdminSession(req, {
+          touch: false,
+          onSessionRevoked: (revocation) => composition.realtime.support.closeSession(revocation.actorType, revocation.sessionId),
+        });
+      }
       (req as Request & { authLocals?: unknown }).authLocals = context;
       return next();
     } catch (error) { return next(error); }
@@ -46,6 +58,7 @@ export function createApp(composition = createCompositionRoot()): Express {
     return next();
   });
   app.use(csrfProtection);
+  app.use(touchAdminSessionForMutation);
 
   app.get('/health/live', (_req, res) => res.json({ status: 'ok' }));
   app.get('/health/ready', async (_req, res, next) => { try { await prisma.$queryRawUnsafe('SELECT 1'); return res.json({ status: 'ready' }); } catch (error) { return next(error); } });
@@ -53,6 +66,8 @@ export function createApp(composition = createCompositionRoot()): Express {
     app.use(`${prefix}/auth`, composition.routers.customerAccess);
     app.use(`${prefix}/admin/auth`, composition.routers.adminAccess);
     app.use(`${prefix}/loyalty`, composition.routers.loyalty);
+    app.use(`${prefix}/support`, composition.routers.support);
+    app.use(`${prefix}/admin/support`, composition.routers.adminSupport);
     app.use(prefix, composition.routers.commerce);
     app.use(`${prefix}/admin`, composition.routers.backoffice);
   };

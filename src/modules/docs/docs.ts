@@ -13,6 +13,14 @@ import {
 } from '../catalog/index.js';
 import { adminLoginSchema, adminPrincipalSchema, csrfTokenSchema } from '../auth/index.js';
 import { registerAdminCmsPaths } from './admin-docs.js';
+import {
+  createAdminSupportConversationSchema,
+  createSupportMessageSchema,
+  createUserSupportConversationSchema,
+  markSupportReadSchema,
+  supportStatusSchema,
+  updateSupportStatusSchema,
+} from '../support/index.js';
 
 extendZodWithOpenApi(z);
 const moneySchema = catalogMoneySchema;
@@ -128,6 +136,26 @@ const publicOrderSchema = z.object({
   }).nullable(),
   createdAt: dateTimeSchema,
 });
+const supportMessageResponseSchema = z.object({
+  id: z.string().uuid(),
+  conversationId: z.string().uuid(),
+  senderType: z.enum(['USER', 'ADMIN']),
+  sender: z.object({ id: z.string(), name: z.string() }),
+  content: z.string(),
+  createdAt: dateTimeSchema,
+});
+const supportConversationSchema = z.object({
+  id: z.string().uuid(),
+  status: supportStatusSchema,
+  subject: z.string(),
+  user: z.object({ id: z.string().uuid(), name: z.string().nullable(), email: z.string().email() }),
+  createdByType: z.enum(['USER', 'ADMIN']),
+  lastMessageAt: dateTimeSchema,
+  lastMessagePreview: z.string().nullable(),
+  createdAt: dateTimeSchema,
+  updatedAt: dateTimeSchema,
+  unreadCount: z.number().int().nonnegative(),
+});
 
 export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
   const registry = new OpenAPIRegistry();
@@ -140,6 +168,8 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
   registry.register('LoyaltyProgram', loyaltyProgramSchema);
   registry.register('LoyaltyAccount', loyaltyAccountSummarySchema);
   registry.register('LoyaltyTransaction', loyaltyTransactionSchema);
+  registry.register('SupportConversation', supportConversationSchema);
+  registry.register('SupportMessage', supportMessageResponseSchema);
   const envelope = (schema: z.ZodType) => z.object({ data: schema, meta: z.record(z.string(), z.unknown()).optional() });
   const adminSecurity = [{ adminCookie: [] }];
   const userSecurity = [{ userCookie: [] }];
@@ -183,6 +213,7 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
     path: '/api/v2/admin/auth/me',
     tags: ['Admin authentication'],
     summary: 'Read the current administrator',
+    description: 'Validates the administrator session without extending its idle timeout. Safe-method admin reads are intentionally activity-neutral so polling cannot keep a session alive.',
     security: adminSecurity,
     responses: {
       200: { description: 'Current administrator', content: { 'application/json': { schema: envelope(z.object({ admin: adminPrincipalSchema })) } } },
@@ -245,13 +276,51 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
     request: { params: z.object({ number: z.string().min(1) }) },
     responses: { 200: { description: 'Order detail with immutable loyalty snapshot', content: { 'application/json': { schema: envelope(z.object({ order: publicOrderSchema })) } } }, 401: publicErrors[401], 404: { description: 'Order not found', content: { 'application/json': { schema: problemSchema } } } },
   });
+  const supportConversationQuery = z.object({
+    status: supportStatusSchema.optional(),
+    cursor: z.string().uuid().optional(),
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+  });
+  const supportMessageQuery = z.object({
+    cursor: z.string().uuid().optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+  });
+  const supportConversationParams = z.object({ id: z.string().uuid() });
+  const supportListResponse = z.object({ data: z.array(supportConversationSchema), meta: z.object({ nextCursor: z.string().uuid().nullable() }) });
+  const supportDetailResponse = z.object({ data: z.object({ conversation: supportConversationSchema, messages: z.array(supportMessageResponseSchema) }), meta: z.object({ nextCursor: z.string().uuid().nullable() }) });
+  const supportUnreadResponse = envelope(z.object({ count: z.number().int().nonnegative() }));
+  const supportReadResponse = envelope(z.object({ conversationId: z.string().uuid(), readAt: dateTimeSchema, unreadCount: z.number().int().nonnegative() }));
+  const supportConversationResponse = envelope(z.object({ conversation: supportConversationSchema }));
+  const supportCreateResponse = supportConversationResponse;
+  const supportMessageCreatedResponse = envelope(z.object({ message: supportMessageResponseSchema }));
+  const supportErrors = {
+    400: publicErrors[400],
+    401: publicErrors[401],
+    403: publicErrors[403],
+    404: { description: 'Support conversation or message not found', content: { 'application/json': { schema: problemSchema } } },
+    409: { description: 'Conversation is closed or message id was reused', content: { 'application/json': { schema: problemSchema } } },
+  };
+  registry.registerPath({ method: 'get', path: '/api/v2/support/conversations', tags: ['Support'], security: userSecurity, request: { query: supportConversationQuery }, responses: { 200: { description: 'Customer support conversations', content: { 'application/json': { schema: supportListResponse } } }, 401: publicErrors[401] } });
+  registry.registerPath({ method: 'post', path: '/api/v2/support/conversations', tags: ['Support'], security: userSecurity, request: { headers: csrfHeader, body: { required: true, content: { 'application/json': { schema: createUserSupportConversationSchema } } } }, responses: { 200: { description: 'Idempotently reused support conversation', content: { 'application/json': { schema: supportCreateResponse } } }, 201: { description: 'Support conversation opened', content: { 'application/json': { schema: supportCreateResponse } } }, ...supportErrors } });
+  registry.registerPath({ method: 'get', path: '/api/v2/support/unread-count', tags: ['Support'], security: userSecurity, responses: { 200: { description: 'Number of unread admin messages', content: { 'application/json': { schema: supportUnreadResponse } } }, 401: publicErrors[401] } });
+  registry.registerPath({ method: 'get', path: '/api/v2/support/conversations/{id}', tags: ['Support'], security: userSecurity, request: { params: supportConversationParams, query: supportMessageQuery }, responses: { 200: { description: 'Conversation and one page of messages in chronological order', content: { 'application/json': { schema: supportDetailResponse } } }, 401: publicErrors[401], 404: supportErrors[404] } });
+  registry.registerPath({ method: 'post', path: '/api/v2/support/conversations/{id}/messages', tags: ['Support'], security: userSecurity, request: { params: supportConversationParams, headers: csrfHeader, body: { required: true, content: { 'application/json': { schema: createSupportMessageSchema } } } }, responses: { 200: { description: 'Idempotently reused support message', content: { 'application/json': { schema: supportMessageCreatedResponse } } }, 201: { description: 'Support message sent', content: { 'application/json': { schema: supportMessageCreatedResponse } } }, ...supportErrors } });
+  registry.registerPath({ method: 'post', path: '/api/v2/support/conversations/{id}/read', tags: ['Support'], security: userSecurity, request: { params: supportConversationParams, headers: csrfHeader, body: { content: { 'application/json': { schema: markSupportReadSchema } } } }, responses: { 200: { description: 'Conversation read position updated', content: { 'application/json': { schema: supportReadResponse } } }, ...supportErrors } });
+
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/support/conversations', tags: ['Admin support'], security: adminSecurity, request: { query: supportConversationQuery }, responses: { 200: { description: 'All customer support conversations', content: { 'application/json': { schema: supportListResponse } } }, 401: publicErrors[401] } });
+  registry.registerPath({ method: 'post', path: '/api/v2/admin/support/conversations', tags: ['Admin support'], security: adminSecurity, request: { headers: csrfHeader, body: { required: true, content: { 'application/json': { schema: createAdminSupportConversationSchema } } } }, responses: { 200: { description: 'Idempotently reused administrator-opened conversation', content: { 'application/json': { schema: supportCreateResponse } } }, 201: { description: 'Administrator-opened support conversation', content: { 'application/json': { schema: supportCreateResponse } } }, ...supportErrors } });
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/support/unread-count', tags: ['Admin support'], security: adminSecurity, responses: { 200: { description: 'Number of unread customer messages for this administrator', content: { 'application/json': { schema: supportUnreadResponse } } }, 401: publicErrors[401] } });
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/support/conversations/{id}', tags: ['Admin support'], security: adminSecurity, request: { params: supportConversationParams, query: supportMessageQuery }, responses: { 200: { description: 'Conversation and one page of messages in chronological order', content: { 'application/json': { schema: supportDetailResponse } } }, 401: publicErrors[401], 404: supportErrors[404] } });
+  registry.registerPath({ method: 'post', path: '/api/v2/admin/support/conversations/{id}/messages', tags: ['Admin support'], security: adminSecurity, request: { params: supportConversationParams, headers: csrfHeader, body: { required: true, content: { 'application/json': { schema: createSupportMessageSchema } } } }, responses: { 200: { description: 'Idempotently reused support message', content: { 'application/json': { schema: supportMessageCreatedResponse } } }, 201: { description: 'Administrator support message sent', content: { 'application/json': { schema: supportMessageCreatedResponse } } }, ...supportErrors } });
+  registry.registerPath({ method: 'post', path: '/api/v2/admin/support/conversations/{id}/read', tags: ['Admin support'], security: adminSecurity, request: { params: supportConversationParams, headers: csrfHeader, body: { content: { 'application/json': { schema: markSupportReadSchema } } } }, responses: { 200: { description: 'Administrator read position updated', content: { 'application/json': { schema: supportReadResponse } } }, ...supportErrors } });
+  registry.registerPath({ method: 'patch', path: '/api/v2/admin/support/conversations/{id}/status', tags: ['Admin support'], security: adminSecurity, request: { params: supportConversationParams, headers: csrfHeader, body: { required: true, content: { 'application/json': { schema: updateSupportStatusSchema } } } }, responses: { 200: { description: 'Support workflow status changed', content: { 'application/json': { schema: supportConversationResponse } } }, ...supportErrors } });
   registerAdminCmsPaths(registry, { problemSchema, moneySchema });
   const document = new OpenApiGeneratorV31(registry.definitions).generateDocument({
     openapi: '3.1.0',
     info: {
       title: 'back-card-shop API',
       version: '0.2.0',
-      description: 'Secure Pokemon card ecommerce backend. Admin mutations require both the opaque admin cookie and X-CSRF-Token. Admin sessions expire after 15 minutes of inactivity and after 8 hours absolutely. Every /api/v2/admin response is marked Cache-Control: no-store.',
+      description: 'Secure Pokemon card ecommerce backend. Admin mutations require both the opaque admin cookie and X-CSRF-Token. Only authenticated state-changing admin requests extend the 15-minute idle timeout; GET/HEAD/OPTIONS requests never do, so polling cannot keep a session alive. Admin sessions also expire after 8 hours absolutely. Every /api/v2/admin response is marked Cache-Control: no-store.',
     },
     servers: [{ url: '/' }],
     security: [],
@@ -271,8 +340,28 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
       { name: 'Checkout' },
       { name: 'Orders' },
       { name: 'Loyalty', description: 'Configurable purchase points, redemption limits and account movements.' },
+      { name: 'Support', description: 'Customer support inbox. Realtime events use /api/v2/support/ws?role=user with the customer cookie.' },
+      { name: 'Admin support', description: 'Administrator support inbox. Realtime events use /api/v2/support/ws?role=admin with the admin cookie.' },
     ],
   });
+  (document as typeof document & { 'x-websocket'?: unknown })['x-websocket'] = {
+    url: '/api/v2/support/ws?role={user|admin}',
+    authentication: 'Opaque role-specific session cookie; Origin must be configured in FRONTEND_ORIGINS.',
+    sessionLifecycle: 'Every socket is bound to the exact authenticated session and all tabs using that session are closed immediately when it is revoked or replaced at login.',
+    closeCodes: { sessionRevoked: 4001, actorSocketLimitExceeded: 4008 },
+    clientMessages: [{ type: 'ping' }],
+    serverEvents: [
+      'connection.ready',
+      'support.conversation.created',
+      'support.message.created',
+      'support.conversation.read',
+      'support.conversation.status_changed',
+      'support.unread_count',
+      'pong',
+      'protocol.error',
+    ],
+    envelope: { type: 'string', payload: 'object', sentAt: 'ISO-8601 date-time' },
+  };
   document.components = { ...(document.components ?? {}), securitySchemes: { userCookie: { type: 'apiKey', in: 'cookie', name: env.cookieSecure ? '__Host-bcs_user' : 'bcs_user' }, adminCookie: { type: 'apiKey', in: 'cookie', name: env.cookieSecure ? '__Host-bcs_admin' : 'bcs_admin' } } };
   return document;
 }

@@ -15,6 +15,7 @@ import {
 import { createMediaRouter, createRetiredImageCleanup, discardUnattachedFile, saveImage, type CleanupRetiredProductImages } from '../modules/media/index.js';
 import { createDocsRouter } from '../modules/docs/index.js';
 import { createLoyaltyRouter } from '../modules/loyalty/index.js';
+import { createSupportRouters, SupportRealtimeHub } from '../modules/support/index.js';
 import { PrismaUnitOfWork } from '../shared/infrastructure/prisma-unit-of-work.js';
 
 export interface CompositionRoot {
@@ -23,12 +24,15 @@ export interface CompositionRoot {
   unitOfWork: PrismaUnitOfWork;
   upload: multer.Multer;
   applications: { backoffice: AdminCmsApplication; retiredImageCleanup: CleanupRetiredProductImages };
+  realtime: { support: SupportRealtimeHub };
   routers: {
     customerAccess: ReturnType<typeof createAuthRouter>;
     adminAccess: ReturnType<typeof createAdminAuthRouter>;
     catalog: ReturnType<typeof createCatalogV2Router>;
     commerce: ReturnType<typeof createOrdersRouter>;
     loyalty: ReturnType<typeof createLoyaltyRouter>;
+    support: ReturnType<typeof createSupportRouters>['userRouter'];
+    adminSupport: ReturnType<typeof createSupportRouters>['adminRouter'];
     backoffice: ReturnType<typeof createAdminCmsRouter>;
     media: ReturnType<typeof createMediaRouter>;
     docs: ReturnType<typeof createDocsRouter>;
@@ -49,6 +53,11 @@ export function createCompositionRoot(): CompositionRoot {
     },
   });
   const retiredImageCleanup = createRetiredImageCleanup(prisma, writeCoordinator, env.STORAGE_ROOT);
+  const supportRealtime = new SupportRealtimeHub();
+  const supportRouters = createSupportRouters(prisma, writeCoordinator, supportRealtime);
+  const onSessionRevoked = (revocation: { actorType: 'USER' | 'ADMIN'; sessionId: string }) => {
+    supportRealtime.closeSession(revocation.actorType, revocation.sessionId);
+  };
   const actorFromRequest = (request: Request) => {
     const session = currentAdmin(request);
     if (!session) throw new Error('Admin guard did not populate request context');
@@ -71,12 +80,15 @@ export function createCompositionRoot(): CompositionRoot {
     unitOfWork: new PrismaUnitOfWork(prisma),
     upload,
     applications: { backoffice: backofficeApplication, retiredImageCleanup },
+    realtime: { support: supportRealtime },
     routers: {
-      customerAccess: createAuthRouter(prisma),
-      adminAccess: createAdminAuthRouter(prisma),
+      customerAccess: createAuthRouter(prisma, { onSessionRevoked }),
+      adminAccess: createAdminAuthRouter(prisma, { onSessionRevoked }),
       catalog: createCatalogV2Router(new PrismaCatalogRepository(prisma)),
       commerce: createOrdersRouter(prisma, upload),
       loyalty: createLoyaltyRouter(prisma),
+      support: supportRouters.userRouter,
+      adminSupport: supportRouters.adminRouter,
       backoffice: backofficeRouter,
       media: createMediaRouter(prisma),
       docs: createDocsRouter(),

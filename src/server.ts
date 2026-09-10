@@ -6,6 +6,7 @@ import { configureSqlite, prisma, writeCoordinator } from './infrastructure/pris
 import { ensureStorage } from './modules/media/index.js';
 import { logger } from './infrastructure/logger.js';
 import { ExpireReservations } from './modules/inventory/index.js';
+import { attachSupportWebSocketServer, getSupportUnreadCount } from './modules/support/index.js';
 
 const lockPath = path.resolve(env.STORAGE_ROOT, 'app.lock');
 
@@ -81,12 +82,17 @@ async function main() {
   mediaCleanupTimer.unref();
   void cleanupRetiredImages().catch((error) => logger.error({ err: error }, 'Initial retired product image cleanup failed'));
   const server = app.listen(env.PORT, () => logger.info({ port: env.PORT }, 'back-card-shop listening'));
+  const supportWebSocketServer = attachSupportWebSocketServer(server, {
+    hub: composition.realtime.support,
+    getUnreadCount: (actor) => getSupportUnreadCount(prisma, actor),
+  });
   let shuttingDown = false;
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
     clearInterval(expirationTimer);
     clearInterval(mediaCleanupTimer);
+    await supportWebSocketServer.close();
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
     });

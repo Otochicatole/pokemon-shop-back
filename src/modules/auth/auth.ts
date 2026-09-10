@@ -16,6 +16,7 @@ import {
   revokeUserSession,
   rotateAdminCsrfToken,
   rotateUserCsrfToken,
+  type SessionRevocationHandler,
 } from '../../infrastructure/sessions.js';
 import { email } from '../../infrastructure/email.js';
 import { logger } from '../../infrastructure/logger.js';
@@ -66,7 +67,11 @@ function toPublicUser(user: { id: string; email: string; name: string | null; em
   return { id: user.id, email: user.email, name: user.name, emailVerified: Boolean(user.emailVerifiedAt) };
 }
 
-export function createAuthRouter(prisma: PrismaClient): Router {
+type AuthRouterOptions = {
+  onSessionRevoked?: SessionRevocationHandler;
+};
+
+export function createAuthRouter(prisma: PrismaClient, options: AuthRouterOptions = {}): Router {
   const router = Router();
 
   router.get('/csrf', async (req, res) => {
@@ -90,11 +95,14 @@ export function createAuthRouter(prisma: PrismaClient): Router {
     const user = await prisma.user.findUnique({ where: { email: normalizeEmail(input.email) } });
     if (!user || !user.passwordHash || !(await verifyPassword(user.passwordHash, input.password))) throw unauthorized('Invalid credentials');
     if (user.status !== 'ACTIVE') throw unauthorized('Invalid credentials');
-    const session = await createUserSession(user.id, res, req);
+    const session = await createUserSession(user.id, res, req, options.onSessionRevoked);
     return res.status(200).json({ user: toPublicUser(user), csrfToken: session.csrfToken });
   });
 
-  router.post('/logout', async (req, res) => { await revokeUserSession(req, res); return res.status(204).send(); });
+  router.post('/logout', async (req, res) => {
+    await revokeUserSession(req, res, options.onSessionRevoked);
+    return res.status(204).send();
+  });
   router.get('/me', requireUser, (req, res) => res.json({ user: toPublicUser(currentUser(req)!.user) }));
 
   router.post('/verify-email', async (req, res) => {
@@ -123,11 +131,19 @@ export function createAuthRouter(prisma: PrismaClient): Router {
     const input = resetSchema.parse(req.body);
     const token = await prisma.userToken.findFirst({ where: { tokenHash: sha256(input.token), type: 'PASSWORD_RESET', usedAt: null, expiresAt: { gt: new Date() } } });
     if (!token) throw badRequest('INVALID_TOKEN', 'Invalid or expired reset token');
-    await prisma.$transaction(async (tx) => {
+    const revokedSessions = await prisma.$transaction(async (tx) => {
+      const sessions = await tx.userSession.findMany({
+        where: { userId: token.userId, revokedAt: null },
+        select: { id: true },
+      });
       await tx.userToken.update({ where: { id: token.id }, data: { usedAt: new Date() } });
       await tx.user.update({ where: { id: token.userId }, data: { passwordHash: await hashPassword(input.password) } });
       await tx.userSession.updateMany({ where: { userId: token.userId, revokedAt: null }, data: { revokedAt: new Date() } });
+      return sessions;
     });
+    for (const session of revokedSessions) {
+      options.onSessionRevoked?.({ actorType: 'USER', actorId: token.userId, sessionId: session.id });
+    }
     return res.status(204).send();
   });
 
@@ -175,7 +191,7 @@ export function createAuthRouter(prisma: PrismaClient): Router {
         if (existing) throw conflict('EXPLICIT_LINK_REQUIRED', 'Sign in locally before linking this Google account');
         user = await prisma.user.create({ data: { email: normalizeEmail(claims.email), name: claims.name, emailVerifiedAt: new Date(), oauthAccounts: { create: { issuer, subject: claims.sub, emailAtLogin: claims.email } } } });
       }
-      const session = await createUserSession(user.id, res, req);
+      const session = await createUserSession(user.id, res, req, options.onSessionRevoked);
       res.clearCookie(GOOGLE_COOKIE, { path: '/' });
       return res.redirect(`${redirectTarget()}/auth/callback?oauth=success`);
     } catch (error) {
@@ -188,7 +204,7 @@ export function createAuthRouter(prisma: PrismaClient): Router {
   return router;
 }
 
-export function createAdminAuthRouter(prisma: PrismaClient): Router {
+export function createAdminAuthRouter(prisma: PrismaClient, options: AuthRouterOptions = {}): Router {
   const router = Router();
   router.get('/csrf', requireAdmin, async (req, res) => {
     return res.status(200).json({ csrfToken: await rotateAdminCsrfToken(req, res) });
@@ -197,10 +213,13 @@ export function createAdminAuthRouter(prisma: PrismaClient): Router {
     const input = adminLoginSchema.parse(req.body);
     const admin = await prisma.admin.findUnique({ where: { email: normalizeEmail(input.email) } });
     if (!admin || admin.status !== 'ACTIVE' || !(await verifyPassword(admin.passwordHash, input.password))) throw unauthorized('Invalid credentials');
-    const session = await createAdminSession(admin.id, res, req);
+    const session = await createAdminSession(admin.id, res, req, options.onSessionRevoked);
     return res.json({ admin: { id: admin.id, email: admin.email, name: admin.name, role: 'SUPER_ADMIN' }, csrfToken: session.csrfToken });
   });
-  router.post('/logout', async (req, res) => { await revokeAdminSession(req, res); return res.status(204).send(); });
+  router.post('/logout', async (req, res) => {
+    await revokeAdminSession(req, res, options.onSessionRevoked);
+    return res.status(204).send();
+  });
   router.get('/me', requireAdmin, (req, res) => res.json({ admin: { id: currentAdmin(req)!.admin.id, email: currentAdmin(req)!.admin.email, name: currentAdmin(req)!.admin.name, role: 'SUPER_ADMIN' } }));
   return router;
 }
