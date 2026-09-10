@@ -11,6 +11,8 @@ const adminEmail = process.env.SEED_ADMIN_EMAIL ?? 'admin@cardshop.test';
 const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? 'Admin123!seed-card-shop';
 const userEmail = process.env.SEED_USER_EMAIL ?? 'user@cardshop.test';
 const userPassword = process.env.SEED_USER_PASSWORD ?? 'User123!seed-card-shop';
+const loyaltyProgramId = 'default';
+const demoLoyaltyStartingPoints = 40;
 
 type SeedPokemonType = 'COLORLESS' | 'DARKNESS' | 'DRAGON' | 'FAIRY' | 'FIGHTING' | 'FIRE' | 'GRASS' | 'LIGHTNING' | 'METAL' | 'PSYCHIC' | 'WATER';
 type SeedCondition = 'NM' | 'EXCELLENT' | 'GOOD' | 'PLAYED' | 'DAMAGED';
@@ -409,6 +411,35 @@ async function main() {
     },
   });
   const user = await prisma.user.upsert({ where: { email: userEmail }, update: { name: 'Demo Collector', passwordHash: await argon2.hash(userPassword, { type: argon2.argon2id }), status: 'ACTIVE', emailVerifiedAt: new Date() }, create: { email: userEmail, name: 'Demo Collector', passwordHash: await argon2.hash(userPassword, { type: argon2.argon2id }), status: 'ACTIVE', emailVerifiedAt: new Date() } });
+  await prisma.loyaltyProgram.upsert({
+    where: { id: loyaltyProgramId },
+    update: {},
+    create: {
+      id: loyaltyProgramId,
+      enabled: true,
+      currency: 'ARS',
+      spendPerPointMinor: 30_000n,
+      pointsPerStep: 1,
+      pointValueMinor: 1_500n,
+      minimumRedemptionPoints: 5,
+      maximumRedemptionPercent: 25,
+    },
+  });
+  await prisma.$transaction(async (tx) => {
+    const existingAccount = await tx.loyaltyAccount.findUnique({ where: { userId: user.id } });
+    if (existingAccount) return;
+    const account = await tx.loyaltyAccount.create({ data: { userId: user.id, balance: demoLoyaltyStartingPoints } });
+    await tx.loyaltyTransaction.create({
+      data: {
+        accountId: account.id,
+        userId: user.id,
+        type: 'ADJUSTMENT',
+        points: demoLoyaltyStartingPoints,
+        balanceAfter: demoLoyaltyStartingPoints,
+        description: 'Saldo inicial de demostración para probar descuentos exclusivos',
+      },
+    });
+  });
   await prisma.adminRecoveryCode.deleteMany({ where: { adminId: admin.id } });
   for (const product of products) {
     await prisma.product.upsert({ where: { id: product.id }, update: { sku: product.sku, slug: product.slug, name: product.name, description: product.description, kind: product.kind, stockMode: product.stockMode, priceMinor: product.priceMinor, currency: 'ARS', status: 'PUBLISHED', publishedAt: new Date(), archivedAt: null, version: 1 }, create: { id: product.id, sku: product.sku, slug: product.slug, name: product.name, description: product.description, kind: product.kind, stockMode: product.stockMode, priceMinor: product.priceMinor, currency: 'ARS', status: 'PUBLISHED', publishedAt: new Date(), version: 1 } });
@@ -429,7 +460,7 @@ async function main() {
   }
   const receiptFileId = await seedPrivateTransferReceipt();
   await seedCmsOrders({ adminId: admin.id, userId: user.id, zone, shippingRate: standardShippingRate, pickupPoint, receiptFileId, now: new Date() });
-  console.log(JSON.stringify({ seed: 'ok', admin: { email: adminEmail, password: adminPassword }, user: { email: userEmail, password: userPassword }, products: products.length, suppliers: suppliers.length, orders: cmsOrderFixtures.length, pendingTransferReceiptFileId: receiptFileId, pickupPointId: pickupPoint.id, shippingRateIds: ['aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1', 'aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2'] }, null, 2));
+  console.log(JSON.stringify({ seed: 'ok', admin: { email: adminEmail, password: adminPassword }, user: { email: userEmail, password: userPassword, loyaltyStartingPoints: demoLoyaltyStartingPoints }, products: products.length, suppliers: suppliers.length, orders: cmsOrderFixtures.length, pendingTransferReceiptFileId: receiptFileId, pickupPointId: pickupPoint.id, shippingRateIds: ['aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1', 'aaaaaaa2-aaaa-4aaa-8aaa-aaaaaaaaaaa2'] }, null, 2));
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(async () => { await prisma.$disconnect(); });

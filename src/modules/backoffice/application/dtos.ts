@@ -13,6 +13,26 @@ export type MoneyDto = { amountMinor: string; currency: string };
 export type CursorPageDto<T> = { data: T[]; nextCursor: string | null };
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
+export type LoyaltyProgramDto = {
+  enabled: boolean;
+  currency: string;
+  spendPerPoint: MoneyDto;
+  pointsPerStep: number;
+  pointValue: MoneyDto;
+  minimumRedemptionPoints: number;
+  maximumRedemptionPercent: number;
+  version: number;
+  updatedAt: Date;
+};
+
+export type LoyaltyAccountDto = {
+  balance: number;
+  reserved: number;
+  available: number;
+  lifetimeEarned: number;
+  lifetimeRedeemed: number;
+};
+
 export type DashboardDto = {
   range: 'TODAY' | '7D' | '30D';
   since: Date;
@@ -124,7 +144,16 @@ export type OrderDto = {
   status: OrderStatusValue;
   paymentMethod: PaymentMethodValue;
   fulfillmentType: 'SHIPMENT' | 'PICKUP';
-  totals: { subtotal: MoneyDto; shipping: MoneyDto; total: MoneyDto };
+  totals: { subtotal: MoneyDto; discount: MoneyDto; shipping: MoneyDto; total: MoneyDto };
+  loyalty: {
+    programVersion: number | null;
+    pointsRedeemed: number;
+    pointsDiscount: MoneyDto;
+    pointsEarned: number;
+    redemptionStatus: 'NONE' | 'RESERVED' | 'REDEEMED' | 'RELEASED' | 'RESTORED';
+    spendPerPoint: MoneyDto | null;
+    pointValue: MoneyDto | null;
+  };
   customer: OrderCustomerDto;
   fulfillment: ShipmentDto | PickupDto;
   items: Array<{
@@ -194,9 +223,9 @@ export type SupplierDto = {
 export type SupplierDetailDto = { supplier: SupplierDto };
 export type SupplierActiveMutationDto = { id: string; active: boolean; version: number };
 
-export type CustomerSummaryDto = OrderCustomerDto & { ordersCount: number; paidTotal: MoneyDto };
+export type CustomerSummaryDto = OrderCustomerDto & { ordersCount: number; paidTotal: MoneyDto; loyalty: LoyaltyAccountDto };
 export type CustomerDetailDto = {
-  customer: OrderCustomerDto & { updatedAt: Date; ordersCount: number; paidTotal: MoneyDto; orders: OrderDto[] };
+  customer: OrderCustomerDto & { updatedAt: Date; ordersCount: number; paidTotal: MoneyDto; loyalty: LoyaltyAccountDto; orders: OrderDto[] };
 };
 
 export type AuditEntryDto = {

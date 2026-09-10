@@ -12,13 +12,19 @@ import { publicOrderNumber, sha256 } from '../../shared/ids.js';
 import { moneyDto } from '../../shared/money.js';
 import { discardUnattachedFile, saveImage } from '../media/index.js';
 import { logger } from '../../infrastructure/logger.js';
+import { calculateLoyaltyQuote, releaseOrderLoyaltyReservation, reserveLoyaltyPoints, reverseOrderLoyalty, settleOrderLoyalty } from '../loyalty/index.js';
 
 const itemSchema = z.object({ productId: z.string().uuid(), quantity: z.number().int().min(1).max(100), productVersion: z.number().int().min(1) });
 const fulfillmentSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('PICKUP'), pickupPointId: z.string().uuid() }),
   z.object({ type: z.literal('SHIPMENT'), shippingRateId: z.string().uuid(), recipientName: z.string().trim().min(1).max(120), recipientPhone: z.string().trim().min(6).max(40), addressLine1: z.string().trim().min(1).max(180), addressLine2: z.string().trim().max(180).optional(), city: z.string().trim().min(1).max(100), province: z.string().trim().min(1).max(100), postalCode: z.string().trim().min(3).max(20) }),
 ]);
-const checkoutSchema = z.object({ items: z.array(itemSchema).min(1).max(50), fulfillment: fulfillmentSchema, paymentMethod: z.enum(['BANK_TRANSFER', 'MERCADO_PAGO']) });
+const checkoutSchema = z.object({
+  items: z.array(itemSchema).min(1).max(50),
+  fulfillment: fulfillmentSchema,
+  paymentMethod: z.enum(['BANK_TRANSFER', 'MERCADO_PAGO']),
+  pointsToRedeem: z.number().int().min(0).max(2_000_000_000).default(0),
+});
 
 type CheckoutInput = z.infer<typeof checkoutSchema>;
 
@@ -35,7 +41,16 @@ function mapOrder(order: any) {
     status: order.status,
     paymentMethod: order.paymentMethod,
     fulfillmentType: order.fulfillmentType,
-    totals: { subtotal: moneyDto({ amountMinor: order.subtotalMinor, currency: 'ARS' }), shipping: moneyDto({ amountMinor: order.shippingMinor, currency: 'ARS' }), total: moneyDto({ amountMinor: order.totalMinor, currency: 'ARS' }) },
+    totals: { subtotal: moneyDto({ amountMinor: order.subtotalMinor, currency: 'ARS' }), discount: moneyDto({ amountMinor: order.pointsDiscountMinor, currency: 'ARS' }), shipping: moneyDto({ amountMinor: order.shippingMinor, currency: 'ARS' }), total: moneyDto({ amountMinor: order.totalMinor, currency: 'ARS' }) },
+    loyalty: {
+      programVersion: order.loyaltyProgramVersion ?? null,
+      pointsRedeemed: order.pointsRedeemed,
+      pointsDiscount: moneyDto({ amountMinor: order.pointsDiscountMinor, currency: 'ARS' }),
+      pointsEarned: order.pointsEarned,
+      redemptionStatus: order.loyaltyRedemptionStatus,
+      spendPerPoint: order.loyaltySpendPerPointMinor === null || order.loyaltySpendPerPointMinor === undefined ? null : moneyDto({ amountMinor: order.loyaltySpendPerPointMinor, currency: 'ARS' }),
+      pointValue: order.loyaltyPointValueMinor === null || order.loyaltyPointValueMinor === undefined ? null : moneyDto({ amountMinor: order.loyaltyPointValueMinor, currency: 'ARS' }),
+    },
     expiresAt: order.expiresAt,
     items: order.items?.map((item: any) => ({ productId: item.productId, sku: item.sku, name: item.productName, imageFileId: item.imageFileId ?? null, imageUrl: item.imageFileId ? `/media/public/${item.imageFileId}` : null, quantity: item.quantity, unitPrice: moneyDto({ amountMinor: item.unitPriceMinor, currency: 'ARS' }), lineTotal: moneyDto({ amountMinor: item.lineTotalMinor, currency: 'ARS' }) })),
     fulfillment: order.fulfillmentType === 'SHIPMENT' ? { type: 'SHIPMENT', recipientName: order.recipientName, recipientPhone: order.recipientPhone, addressLine1: order.addressLine1, addressLine2: order.addressLine2, city: order.city, province: order.province, postalCode: order.postalCode, shippingRateId: order.shippingRateId, shippingZoneName: order.shippingZoneName ?? null, shippingRateName: order.shippingRateName ?? null, shippingRatePrice: order.shippingRatePriceMinor === null || order.shippingRatePriceMinor === undefined ? null : moneyDto({ amountMinor: order.shippingRatePriceMinor, currency: 'ARS' }) } : { type: 'PICKUP', pickupPointId: order.pickupPointId, pickupPointName: order.pickupPointName ?? null, pickupPointAddress: order.pickupPointAddress ?? null },
@@ -44,7 +59,7 @@ function mapOrder(order: any) {
   };
 }
 
-async function calculateCheckout(tx: any, input: CheckoutInput) {
+async function calculateCheckout(tx: any, input: CheckoutInput, userId: string) {
   const products = [] as any[];
   let subtotal = 0n;
   for (const item of input.items) {
@@ -71,7 +86,8 @@ async function calculateCheckout(tx: any, input: CheckoutInput) {
     if (!pickup?.active) throw badRequest('INVALID_PICKUP_POINT', 'Pickup point is not available');
     fulfillmentSnapshot = { pickupPointName: pickup.name, pickupPointAddress: pickup.address };
   }
-  return { products, subtotal, shipping, total: subtotal + shipping, fulfillmentSnapshot };
+  const loyalty = await calculateLoyaltyQuote(tx, userId, subtotal, input.pointsToRedeem);
+  return { products, subtotal, shipping, discount: loyalty.discountMinor, total: subtotal + shipping - loyalty.discountMinor, fulfillmentSnapshot, loyalty };
 }
 
 async function createMercadoPreference(order: any) {
@@ -79,10 +95,10 @@ async function createMercadoPreference(order: any) {
   const client = new MercadoPagoConfig({ accessToken: env.MERCADOPAGO_ACCESS_TOKEN });
   const preference = new Preference(client);
   const response = await preference.create({ body: {
-    items: order.items.map((item: any) => ({ id: item.sku, title: item.productName, quantity: item.quantity, currency_id: 'ARS', unit_price: Number(item.unitPriceMinor) / 100 })),
+    items: [{ id: order.number, title: `Compra ${order.number}`, quantity: 1, currency_id: 'ARS', unit_price: Number(order.totalMinor) / 100 }],
     external_reference: order.number,
     notification_url: `${env.PUBLIC_API_URL ?? `http://localhost:${env.PORT}`}/api/v2/webhooks/mercado-pago`,
-    back_urls: { success: `${env.frontendOrigins[0] ?? 'http://localhost:5173'}/orders/${order.number}`, failure: `${env.frontendOrigins[0] ?? 'http://localhost:5173'}/orders/${order.number}`, pending: `${env.frontendOrigins[0] ?? 'http://localhost:5173'}/orders/${order.number}` },
+    back_urls: { success: `${env.frontendOrigins[0] ?? 'http://localhost:5173'}/account/orders/${order.number}`, failure: `${env.frontendOrigins[0] ?? 'http://localhost:5173'}/account/orders/${order.number}`, pending: `${env.frontendOrigins[0] ?? 'http://localhost:5173'}/account/orders/${order.number}` },
     auto_return: 'approved',
     expires: true,
     expiration_date_to: order.expiresAt?.toISOString(),
@@ -90,7 +106,7 @@ async function createMercadoPreference(order: any) {
   return { id: response.id, initPoint: response.init_point ?? response.sandbox_init_point };
 }
 
-async function reconcileMercadoPayment(externalId: string) {
+export async function reconcileMercadoPayment(externalId: string) {
   if (!env.MERCADOPAGO_ACCESS_TOKEN) return;
   try {
     const client = new MercadoPagoConfig({ accessToken: env.MERCADOPAGO_ACCESS_TOKEN });
@@ -120,9 +136,19 @@ async function reconcileMercadoPayment(externalId: string) {
           await tx.inventory.update({ where: { productId: reservation.productId }, data: { onHand: { decrement: reservation.quantity }, reserved: { decrement: reservation.quantity }, version: { increment: 1 } } });
           await tx.inventoryReservation.update({ where: { id: reservation.id }, data: { consumedAt: new Date() } });
         }
+        await settleOrderLoyalty(tx, current.id);
       } else if (mapped === 'REJECTED' && ['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(current.status)) {
         await tx.order.update({ where: { id: current.id }, data: { status: 'CANCELLED', version: { increment: 1 } } });
         await releaseReservations(tx, current.id);
+        await releaseOrderLoyaltyReservation(tx, current.id);
+      } else if (mapped === 'REFUNDED') {
+        await releaseReservations(tx, current.id);
+        await releaseOrderLoyaltyReservation(tx, current.id);
+        if (current.status !== 'REFUND_RECORDED') {
+          await tx.order.update({ where: { id: current.id }, data: { status: 'REFUND_RECORDED', version: { increment: 1 } } });
+          await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'REFUND_RECORDED', note: 'Mercado Pago refunded webhook' } });
+        }
+        await reverseOrderLoyalty(tx, current.id);
       } else if (mapped === 'APPROVED' && current.status === 'EXPIRED') {
         await tx.order.update({ where: { id: current.id }, data: { status: 'PAYMENT_REQUIRES_REVIEW', version: { increment: 1 } } });
       }
@@ -148,8 +174,25 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
     const input = checkoutSchema.parse(req.body);
     if (env.NODE_ENV === 'production' && input.paymentMethod === 'BANK_TRANSFER' && !(env.BANK_NAME && env.BANK_ACCOUNT_HOLDER && (env.BANK_CBU || env.BANK_ALIAS))) throw new AppError(503, 'PAYMENT_METHOD_NOT_CONFIGURED', 'Bank transfer is not configured');
     if (input.paymentMethod === 'MERCADO_PAGO' && !env.MERCADOPAGO_ACCESS_TOKEN) throw new AppError(503, 'PAYMENT_METHOD_NOT_CONFIGURED', 'Mercado Pago is not configured');
-    const quote = await calculateCheckout(prisma, input);
-    return res.json({ subtotal: moneyDto({ amountMinor: quote.subtotal, currency: 'ARS' }), shipping: moneyDto({ amountMinor: quote.shipping, currency: 'ARS' }), total: moneyDto({ amountMinor: quote.total, currency: 'ARS' }), expiresAt: new Date(Date.now() + 10 * 60 * 1000) });
+    const quote = await calculateCheckout(prisma, input, user.id);
+    return res.json({
+      subtotal: moneyDto({ amountMinor: quote.subtotal, currency: 'ARS' }),
+      discount: moneyDto({ amountMinor: quote.discount, currency: 'ARS' }),
+      shipping: moneyDto({ amountMinor: quote.shipping, currency: 'ARS' }),
+      total: moneyDto({ amountMinor: quote.total, currency: 'ARS' }),
+      loyalty: {
+        enabled: quote.loyalty.program.enabled,
+        balance: quote.loyalty.balance,
+        reserved: quote.loyalty.reserved,
+        available: quote.loyalty.available,
+        pointsRedeemed: quote.loyalty.pointsRedeemed,
+        maximumRedeemablePoints: quote.loyalty.maximumRedeemablePoints,
+        minimumRedemptionPoints: quote.loyalty.program.minimumRedemptionPoints,
+        pointsToEarn: quote.loyalty.pointsToEarn,
+        pointValue: moneyDto({ amountMinor: quote.loyalty.program.pointValueMinor, currency: 'ARS' }),
+      },
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    });
   });
 
   router.post('/orders', requireUser, async (req, res) => {
@@ -167,16 +210,24 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
         if (previous.idempotencyHash !== hash) throw conflict('IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used with a different request');
         return { order: previous, reused: true };
       }
-      const quote = await calculateCheckout(tx, input);
+      const quote = await calculateCheckout(tx, input, user.id);
       const expiresAt = new Date(Date.now() + (input.paymentMethod === 'BANK_TRANSFER' ? 24 * 60 * 60 * 1000 : 30 * 60 * 1000));
       const order = await tx.order.create({ data: {
         userId: user.id, number: publicOrderNumber(), paymentMethod: input.paymentMethod, fulfillmentType: input.fulfillment.type, subtotalMinor: quote.subtotal, shippingMinor: quote.shipping, totalMinor: quote.total, idempotencyKey: key, idempotencyHash: hash, expiresAt,
+        loyaltyProgramVersion: quote.loyalty.program.version,
+        loyaltySpendPerPointMinor: quote.loyalty.program.spendPerPointMinor,
+        loyaltyPointValueMinor: quote.loyalty.program.pointValueMinor,
+        pointsRedeemed: quote.loyalty.pointsRedeemed,
+        pointsDiscountMinor: quote.loyalty.discountMinor,
+        pointsEarned: quote.loyalty.pointsToEarn,
+        loyaltyRedemptionStatus: quote.loyalty.pointsRedeemed > 0 ? 'RESERVED' : 'NONE',
         ...quote.fulfillmentSnapshot,
         ...(input.fulfillment.type === 'SHIPMENT' ? { shippingRateId: input.fulfillment.shippingRateId, recipientName: input.fulfillment.recipientName, recipientPhone: input.fulfillment.recipientPhone, addressLine1: input.fulfillment.addressLine1, addressLine2: input.fulfillment.addressLine2, city: input.fulfillment.city, province: input.fulfillment.province, postalCode: input.fulfillment.postalCode } : { pickupPointId: input.fulfillment.pickupPointId }),
         items: { create: quote.products.map(({ item, product, line }) => ({ productId: product.id, sku: product.sku, productName: product.name, productSnapshot: JSON.stringify({ ...product, priceMinor: product.priceMinor.toString(), inventory: undefined }), imageFileId: product.images[0]?.fileId ?? null, unitPriceMinor: product.priceMinor, quantity: item.quantity, lineTotalMinor: line })) },
         payment: { create: { method: input.paymentMethod, amountMinor: quote.total, ...(input.paymentMethod === 'BANK_TRANSFER' ? { transfer: { create: { reference: publicOrderNumber() } } } : { mercadoPago: { create: { expiresAt } } }) } },
         statusHistory: { create: { toStatus: 'PENDING_PAYMENT', note: 'Order created' } },
       }, include: { items: true, payment: { include: { transfer: true, mercadoPago: true } } } });
+      await reserveLoyaltyPoints(tx, user.id, quote.loyalty.pointsRedeemed);
       for (const { item, product } of quote.products) {
         const inventory = product.inventory!;
         const updated = await tx.inventory.updateMany({ where: { productId: product.id, version: inventory.version, reserved: { lte: inventory.onHand - item.quantity } }, data: { reserved: { increment: item.quantity }, version: { increment: 1 } } });
@@ -223,6 +274,7 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
       await tx.order.update({ where: { id: current.id }, data: { status: 'CANCELLED', version: { increment: 1 } } });
       await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'CANCELLED', note: 'Cancelled by customer' } });
       await releaseReservations(tx, current.id);
+      await releaseOrderLoyaltyReservation(tx, current.id);
     }));
     return res.status(204).send();
   });

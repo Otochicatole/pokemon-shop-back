@@ -8,6 +8,7 @@ import { OrderAdminUseCases } from './use-cases/order-admin-use-cases.js';
 import { PaymentAdminUseCases } from './use-cases/payment-admin-use-cases.js';
 import { ProductAdminUseCases } from './use-cases/product-admin-use-cases.js';
 import { SupplierAdminUseCases } from './use-cases/supplier-admin-use-cases.js';
+import { LoyaltyAdminUseCases } from './use-cases/loyalty-admin-use-cases.js';
 
 export type AdminCmsApplication = {
   dashboard: DashboardQueries;
@@ -19,6 +20,7 @@ export type AdminCmsApplication = {
   customers: CustomerQueries;
   audit: AuditQueries;
   suppliers: SupplierAdminUseCases;
+  loyalty: LoyaltyAdminUseCases;
 };
 
 export type AdminCmsApplicationConfig = { integrations: DashboardDto['integrations'] };
@@ -34,5 +36,6 @@ export function createAdminCmsApplication(repositories: AdminCmsRepositories, co
     customers: new CustomerQueries(repositories.customers),
     audit: new AuditQueries(repositories.audit),
     suppliers: new SupplierAdminUseCases(repositories.suppliers),
+    loyalty: new LoyaltyAdminUseCases(repositories.loyalty),
   };
 }

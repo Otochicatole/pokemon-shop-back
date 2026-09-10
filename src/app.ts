@@ -52,6 +52,7 @@ export function createApp(composition = createCompositionRoot()): Express {
   const mount = (prefix: string) => {
     app.use(`${prefix}/auth`, composition.routers.customerAccess);
     app.use(`${prefix}/admin/auth`, composition.routers.adminAccess);
+    app.use(`${prefix}/loyalty`, composition.routers.loyalty);
     app.use(prefix, composition.routers.commerce);
     app.use(`${prefix}/admin`, composition.routers.backoffice);
   };

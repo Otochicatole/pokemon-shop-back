@@ -122,20 +122,38 @@ enum FileCleanupStatus {
   COMPLETED
 }
 
+enum LoyaltyTransactionType {
+  EARN
+  REDEEM
+  EARN_REVERSAL
+  REDEEM_REVERSAL
+  ADJUSTMENT
+}
+
+enum LoyaltyRedemptionStatus {
+  NONE
+  RESERVED
+  REDEEMED
+  RELEASED
+  RESTORED
+}
+
 model User {
-  id                String              @id @default(uuid())
-  email             String              @unique
-  name              String?
-  passwordHash      String?
-  status            UserStatus          @default(ACTIVE)
-  emailVerifiedAt   DateTime?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  oauthAccounts     UserOAuthAccount[]
-  sessions          UserSession[]
-  tokens            UserToken[]
-  orders            Order[]
-  outboxMessages    OutboxMessage[]
+  id                  String               @id @default(uuid())
+  email               String               @unique
+  name                String?
+  passwordHash        String?
+  status              UserStatus           @default(ACTIVE)
+  emailVerifiedAt     DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  oauthAccounts       UserOAuthAccount[]
+  sessions            UserSession[]
+  tokens              UserToken[]
+  orders              Order[]
+  outboxMessages      OutboxMessage[]
+  loyaltyAccount      LoyaltyAccount?
+  loyaltyTransactions LoyaltyTransaction[]
 }
 
 model UserOAuthAccount {
@@ -152,79 +170,131 @@ model UserOAuthAccount {
 }
 
 model UserSession {
-  id           String   @id @default(uuid())
-  userId       String
-  tokenHash    String   @unique
-  csrfHash     String
-  expiresAt    DateTime
-  lastSeenAt   DateTime @default(now())
-  createdAt    DateTime @default(now())
-  revokedAt    DateTime?
-  userAgent    String?
-  ipHash       String?
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String    @unique
+  csrfHash   String
+  expiresAt  DateTime
+  lastSeenAt DateTime  @default(now())
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime?
+  userAgent  String?
+  ipHash     String?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, revokedAt])
   @@index([expiresAt])
 }
 
 model UserToken {
-  id         String        @id @default(uuid())
-  userId     String
-  type       UserTokenType
-  tokenHash  String        @unique
-  expiresAt  DateTime
-  usedAt     DateTime?
-  createdAt  DateTime      @default(now())
-  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String        @id @default(uuid())
+  userId    String
+  type      UserTokenType
+  tokenHash String        @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, type])
 }
 
 model Admin {
-  id                String               @id @default(uuid())
-  email             String               @unique
-  name              String?
-  passwordHash      String
-  status            AdminStatus          @default(ACTIVE)
-  totpSecretCipher  String?
-  totpEnabledAt     DateTime?
-  createdAt         DateTime             @default(now())
-  updatedAt         DateTime             @updatedAt
-  sessions          AdminSession[]
-  recoveryCodes     AdminRecoveryCode[]
-  productImages     ProductImage[]
-  inventoryChanges  InventoryAdjustment[]
-  orderHistory      OrderStatusHistory[]
-  transferReviews   TransferReceipt[]
-  refunds           RefundRecord[]
-  bankTransfers     BankTransfer[]
+  id                    String                @id @default(uuid())
+  email                 String                @unique
+  name                  String?
+  passwordHash          String
+  status                AdminStatus           @default(ACTIVE)
+  totpSecretCipher      String?
+  totpEnabledAt         DateTime?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  sessions              AdminSession[]
+  recoveryCodes         AdminRecoveryCode[]
+  productImages         ProductImage[]
+  inventoryChanges      InventoryAdjustment[]
+  orderHistory          OrderStatusHistory[]
+  transferReviews       TransferReceipt[]
+  refunds               RefundRecord[]
+  bankTransfers         BankTransfer[]
+  loyaltyProgramUpdates LoyaltyProgram[]
+}
+
+model LoyaltyProgram {
+  id                       String   @id @default("default")
+  enabled                  Boolean  @default(true)
+  currency                 String   @default("ARS")
+  spendPerPointMinor       BigInt   @default(30000)
+  pointsPerStep            Int      @default(1)
+  pointValueMinor          BigInt   @default(1500)
+  minimumRedemptionPoints  Int      @default(5)
+  maximumRedemptionPercent Int      @default(25)
+  version                  Int      @default(1)
+  updatedById              String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  updatedBy                Admin?   @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([updatedById])
+}
+
+model LoyaltyAccount {
+  id               String               @id @default(uuid())
+  userId           String               @unique
+  balance          Int                  @default(0)
+  reserved         Int                  @default(0)
+  lifetimeEarned   Int                  @default(0)
+  lifetimeRedeemed Int                  @default(0)
+  version          Int                  @default(1)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  user             User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions     LoyaltyTransaction[]
+}
+
+model LoyaltyTransaction {
+  id           String                 @id @default(uuid())
+  accountId    String
+  userId       String
+  orderId      String?
+  type         LoyaltyTransactionType
+  points       Int
+  balanceAfter Int
+  description  String?
+  createdAt    DateTime               @default(now())
+  account      LoyaltyAccount         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user         User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order        Order?                 @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@unique([orderId, type])
+  @@index([accountId, createdAt])
+  @@index([userId, createdAt])
 }
 
 model AdminSession {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   adminId    String
-  tokenHash  String   @unique
+  tokenHash  String    @unique
   csrfHash   String
   expiresAt  DateTime
-  lastSeenAt DateTime @default(now())
-  createdAt  DateTime @default(now())
+  lastSeenAt DateTime  @default(now())
+  createdAt  DateTime  @default(now())
   revokedAt  DateTime?
   userAgent  String?
   ipHash     String?
-  admin      Admin    @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  admin      Admin     @relation(fields: [adminId], references: [id], onDelete: Cascade)
 
   @@index([adminId, revokedAt])
   @@index([expiresAt])
 }
 
 model AdminRecoveryCode {
-  id         String    @id @default(uuid())
-  adminId    String
-  codeHash   String
-  usedAt     DateTime?
-  createdAt  DateTime  @default(now())
-  admin      Admin     @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  id        String    @id @default(uuid())
+  adminId   String
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  admin     Admin     @relation(fields: [adminId], references: [id], onDelete: Cascade)
 
   @@index([adminId, usedAt])
 }
@@ -247,27 +317,27 @@ model Supplier {
 }
 
 model Product {
-  id              String             @id @default(uuid())
-  sku             String             @unique
-  slug            String             @unique
-  name            String
-  description     String
-  kind            ProductKind
-  stockMode       StockMode
-  priceMinor      BigInt
-  currency        String             @default("ARS")
-  status          ProductStatus      @default(DRAFT)
-  version         Int                @default(1)
-  publishedAt     DateTime?
-  archivedAt      DateTime?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  pokemonCard     PokemonCardDetails?
-  inventory       Inventory?
-  images          ProductImage[]
-  orderItems      OrderItem[]
-  inventoryLogs   InventoryAdjustment[]
-  reservations    InventoryReservation[]
+  id            String                 @id @default(uuid())
+  sku           String                 @unique
+  slug          String                 @unique
+  name          String
+  description   String
+  kind          ProductKind
+  stockMode     StockMode
+  priceMinor    BigInt
+  currency      String                 @default("ARS")
+  status        ProductStatus          @default(DRAFT)
+  version       Int                    @default(1)
+  publishedAt   DateTime?
+  archivedAt    DateTime?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  pokemonCard   PokemonCardDetails?
+  inventory     Inventory?
+  images        ProductImage[]
+  orderItems    OrderItem[]
+  inventoryLogs InventoryAdjustment[]
+  reservations  InventoryReservation[]
 
   @@index([status, kind])
   @@index([status, priceMinor])
@@ -276,8 +346,8 @@ model Product {
 }
 
 model PokemonCardDetails {
-  id                  String            @id @default(uuid())
-  productId           String            @unique
+  id                  String           @id @default(uuid())
+  productId           String           @unique
   pokemonType         PokemonType?
   setName             String
   setCode             String?
@@ -290,7 +360,7 @@ model PokemonCardDetails {
   gradingCompany      String?
   grade               String?
   certificationNumber String?
-  product             Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product             Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([setName, cardNumber])
   @@index([setCode])
@@ -304,38 +374,38 @@ model PokemonCardDetails {
 }
 
 model Inventory {
-  id        String   @id @default(uuid())
-  productId String   @unique
-  onHand    Int      @default(0)
-  reserved  Int      @default(0)
-  version   Int      @default(1)
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id        String  @id @default(uuid())
+  productId String  @unique
+  onHand    Int     @default(0)
+  reserved  Int     @default(0)
+  version   Int     @default(1)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
 
 model ProductImage {
-  id          String       @id @default(uuid())
+  id          String     @id @default(uuid())
   productId   String
-  fileId      String       @unique
+  fileId      String     @unique
   altText     String?
-  sortOrder   Int          @default(0)
-  createdAt   DateTime     @default(now())
+  sortOrder   Int        @default(0)
+  createdAt   DateTime   @default(now())
   retiredAt   DateTime?
   createdById String?
-  product     Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
-  file        StoredFile   @relation(fields: [fileId], references: [id], onDelete: Restrict)
-  createdBy   Admin?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  product     Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  file        StoredFile @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  createdBy   Admin?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([productId, retiredAt, sortOrder])
 }
 
 model ShippingZone {
-  id          String                 @id @default(uuid())
-  name        String
-  active      Boolean                @default(true)
-  provinces   ShippingZoneProvince[]
-  rates       ShippingRate[]
-  createdAt   DateTime               @default(now())
-  updatedAt   DateTime               @updatedAt
+  id        String                 @id @default(uuid())
+  name      String
+  active    Boolean                @default(true)
+  provinces ShippingZoneProvince[]
+  rates     ShippingRate[]
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
 
   @@index([active, name])
 }
@@ -351,66 +421,74 @@ model ShippingZoneProvince {
 }
 
 model ShippingRate {
-  id          String       @id @default(uuid())
-  zoneId      String
-  name        String
-  priceMinor  BigInt
-  currency    String       @default("ARS")
-  active      Boolean      @default(true)
-  zone        ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  id         String       @id @default(uuid())
+  zoneId     String
+  name       String
+  priceMinor BigInt
+  currency   String       @default("ARS")
+  active     Boolean      @default(true)
+  zone       ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
 
   @@index([zoneId, active])
 }
 
 model PickupPoint {
-  id         String   @id @default(uuid())
-  name       String
-  address    String
-  active     Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(uuid())
+  name      String
+  address   String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([active, name])
 }
 
 model Order {
-  id                 String                 @id @default(uuid())
-  userId             String
-  number             String                 @unique
-  status             OrderStatus            @default(PENDING_PAYMENT)
-  version            Int                    @default(1)
-  paymentMethod      PaymentMethod
-  fulfillmentType    FulfillmentType
-  currency           String                 @default("ARS")
-  subtotalMinor     BigInt
-  shippingMinor     BigInt
-  totalMinor        BigInt
-  shippingRateId    String?
-  pickupPointId     String?
-  shippingZoneName String?
-  shippingRateName String?
-  shippingRatePriceMinor BigInt?
-  pickupPointName   String?
-  pickupPointAddress String?
-  recipientName     String?
-  recipientPhone    String?
-  addressLine1      String?
-  addressLine2      String?
-  city              String?
-  province          String?
-  postalCode        String?
-  idempotencyKey    String
-  idempotencyHash   String
-  expiresAt         DateTime?
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
-  user              User                   @relation(fields: [userId], references: [id], onDelete: Restrict)
-  items             OrderItem[]
-  reservations      InventoryReservation[]
-  payment           Payment?
-  statusHistory     OrderStatusHistory[]
-  transferReceipts  TransferReceipt[]
-  outboxMessages    OutboxMessage[]
+  id                        String                  @id @default(uuid())
+  userId                    String
+  number                    String                  @unique
+  status                    OrderStatus             @default(PENDING_PAYMENT)
+  version                   Int                     @default(1)
+  paymentMethod             PaymentMethod
+  fulfillmentType           FulfillmentType
+  currency                  String                  @default("ARS")
+  subtotalMinor             BigInt
+  shippingMinor             BigInt
+  totalMinor                BigInt
+  loyaltyProgramVersion     Int?
+  loyaltySpendPerPointMinor BigInt?
+  loyaltyPointValueMinor    BigInt?
+  pointsRedeemed            Int                     @default(0)
+  pointsDiscountMinor       BigInt                  @default(0)
+  pointsEarned              Int                     @default(0)
+  loyaltyRedemptionStatus   LoyaltyRedemptionStatus @default(NONE)
+  shippingRateId            String?
+  pickupPointId             String?
+  shippingZoneName          String?
+  shippingRateName          String?
+  shippingRatePriceMinor    BigInt?
+  pickupPointName           String?
+  pickupPointAddress        String?
+  recipientName             String?
+  recipientPhone            String?
+  addressLine1              String?
+  addressLine2              String?
+  city                      String?
+  province                  String?
+  postalCode                String?
+  idempotencyKey            String
+  idempotencyHash           String
+  expiresAt                 DateTime?
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+  user                      User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  items                     OrderItem[]
+  reservations              InventoryReservation[]
+  payment                   Payment?
+  statusHistory             OrderStatusHistory[]
+  transferReceipts          TransferReceipt[]
+  outboxMessages            OutboxMessage[]
+  loyaltyTransactions       LoyaltyTransaction[]
 
   @@unique([userId, idempotencyKey])
   @@index([userId, createdAt])
@@ -421,34 +499,34 @@ model Order {
 }
 
 model OrderItem {
-  id                 String   @id @default(uuid())
-  orderId            String
-  productId          String
-  sku                String
-  productName        String
-  productSnapshot    String
-  imageFileId        String?
-  unitPriceMinor     BigInt
-  quantity           Int
-  lineTotalMinor     BigInt
-  order              Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product            Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  id              String  @id @default(uuid())
+  orderId         String
+  productId       String
+  sku             String
+  productName     String
+  productSnapshot String
+  imageFileId     String?
+  unitPriceMinor  BigInt
+  quantity        Int
+  lineTotalMinor  BigInt
+  order           Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product         Product @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@index([orderId])
   @@index([imageFileId])
 }
 
 model InventoryReservation {
-  id          String   @id @default(uuid())
-  orderId     String
-  productId   String
-  quantity    Int
-  expiresAt   DateTime
-  releasedAt  DateTime?
-  consumedAt  DateTime?
-  createdAt   DateTime @default(now())
-  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product     Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  id         String    @id @default(uuid())
+  orderId    String
+  productId  String
+  quantity   Int
+  expiresAt  DateTime
+  releasedAt DateTime?
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+  order      Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product    Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@unique([orderId, productId])
   @@index([expiresAt, releasedAt, consumedAt])
@@ -475,85 +553,85 @@ model Payment {
 }
 
 model BankTransfer {
-  id                 String   @id @default(uuid())
-  paymentId          String   @unique
-  reference          String   @unique
-  reviewStatus       TransferReviewStatus @default(PENDING)
-  reviewedAt         DateTime?
-  reviewedById       String?
-  payment            Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  reviewedBy         Admin?   @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
+  id           String               @id @default(uuid())
+  paymentId    String               @unique
+  reference    String               @unique
+  reviewStatus TransferReviewStatus @default(PENDING)
+  reviewedAt   DateTime?
+  reviewedById String?
+  payment      Payment              @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  reviewedBy   Admin?               @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@index([reviewStatus, reviewedAt])
 }
 
 model TransferReceipt {
-  id          String              @id @default(uuid())
-  orderId     String
-  fileId      String              @unique
-  review      TransferReviewStatus @default(PENDING)
-  note        String?
-  createdAt   DateTime            @default(now())
-  reviewedAt  DateTime?
+  id           String               @id @default(uuid())
+  orderId      String
+  fileId       String               @unique
+  review       TransferReviewStatus @default(PENDING)
+  note         String?
+  createdAt    DateTime             @default(now())
+  reviewedAt   DateTime?
   reviewedById String?
-  order       Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  file        StoredFile          @relation(fields: [fileId], references: [id], onDelete: Restrict)
-  reviewedBy  Admin?              @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
+  order        Order                @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  file         StoredFile           @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  reviewedBy   Admin?               @relation(fields: [reviewedById], references: [id], onDelete: SetNull)
 
   @@index([orderId, createdAt])
   @@index([review, createdAt])
 }
 
 model MercadoPagoPayment {
-  id             String   @id @default(uuid())
-  paymentId      String   @unique
-  preferenceId   String?
-  externalPaymentId String? @unique
-  status         String?
-  statusDetail   String?
-  checkoutUrl    String?
-  expiresAt      DateTime?
-  payment        Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  id                String    @id @default(uuid())
+  paymentId         String    @unique
+  preferenceId      String?
+  externalPaymentId String?   @unique
+  status            String?
+  statusDetail      String?
+  checkoutUrl       String?
+  expiresAt         DateTime?
+  payment           Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
 }
 
 model WebhookEvent {
-  id            String   @id @default(uuid())
-  provider      String
-  externalKey  String
-  paymentId     String?
-  receivedAt    DateTime @default(now())
-  processedAt   DateTime?
-  payload       String
-  payment       Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  id          String    @id @default(uuid())
+  provider    String
+  externalKey String
+  paymentId   String?
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+  payload     String
+  payment     Payment?  @relation(fields: [paymentId], references: [id], onDelete: SetNull)
 
   @@unique([provider, externalKey])
   @@index([processedAt])
 }
 
 model RefundRecord {
-  id              String   @id @default(uuid())
-  paymentId       String
-  fullRefundKey   String?  @unique
-  amountMinor     BigInt
-  currency        String   @default("ARS")
-  reason          String
+  id                String   @id @default(uuid())
+  paymentId         String
+  fullRefundKey     String?  @unique
+  amountMinor       BigInt
+  currency          String   @default("ARS")
+  reason            String
   externalReference String
-  createdAt       DateTime @default(now())
-  createdById     String
-  payment         Payment  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
-  createdBy       Admin    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt         DateTime @default(now())
+  createdById       String
+  payment           Payment  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  createdBy         Admin    @relation(fields: [createdById], references: [id], onDelete: Restrict)
 }
 
 model OrderStatusHistory {
-  id          String      @id @default(uuid())
+  id          String       @id @default(uuid())
   orderId     String
   fromStatus  OrderStatus?
   toStatus    OrderStatus
   note        String?
-  createdAt   DateTime    @default(now())
+  createdAt   DateTime     @default(now())
   changedById String?
-  order       Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  changedBy   Admin?      @relation(fields: [changedById], references: [id], onDelete: SetNull)
+  order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  changedBy   Admin?       @relation(fields: [changedById], references: [id], onDelete: SetNull)
 
   @@index([orderId, createdAt])
 }
@@ -570,15 +648,15 @@ model InventoryAdjustment {
 }
 
 model StoredFile {
-  id             String           @id @default(uuid())
-  storageKey     String           @unique
-  originalName   String?
-  mimeType       String
-  sizeBytes      Int
-  sha256         String
-  visibility     FileVisibility
-  createdAt      DateTime         @default(now())
-  productImage   ProductImage?
+  id              String           @id @default(uuid())
+  storageKey      String           @unique
+  originalName    String?
+  mimeType        String
+  sizeBytes       Int
+  sha256          String
+  visibility      FileVisibility
+  createdAt       DateTime         @default(now())
+  productImage    ProductImage?
   transferReceipt TransferReceipt?
 }
 

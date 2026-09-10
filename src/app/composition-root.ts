@@ -14,6 +14,7 @@ import {
 } from '../modules/backoffice/index.js';
 import { createMediaRouter, createRetiredImageCleanup, discardUnattachedFile, saveImage, type CleanupRetiredProductImages } from '../modules/media/index.js';
 import { createDocsRouter } from '../modules/docs/index.js';
+import { createLoyaltyRouter } from '../modules/loyalty/index.js';
 import { PrismaUnitOfWork } from '../shared/infrastructure/prisma-unit-of-work.js';
 
 export interface CompositionRoot {
@@ -27,6 +28,7 @@ export interface CompositionRoot {
     adminAccess: ReturnType<typeof createAdminAuthRouter>;
     catalog: ReturnType<typeof createCatalogV2Router>;
     commerce: ReturnType<typeof createOrdersRouter>;
+    loyalty: ReturnType<typeof createLoyaltyRouter>;
     backoffice: ReturnType<typeof createAdminCmsRouter>;
     media: ReturnType<typeof createMediaRouter>;
     docs: ReturnType<typeof createDocsRouter>;
@@ -74,6 +76,7 @@ export function createCompositionRoot(): CompositionRoot {
       adminAccess: createAdminAuthRouter(prisma),
       catalog: createCatalogV2Router(new PrismaCatalogRepository(prisma)),
       commerce: createOrdersRouter(prisma, upload),
+      loyalty: createLoyaltyRouter(prisma),
       backoffice: backofficeRouter,
       media: createMediaRouter(prisma),
       docs: createDocsRouter(),

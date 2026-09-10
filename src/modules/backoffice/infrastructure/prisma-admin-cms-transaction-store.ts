@@ -5,9 +5,10 @@ import type { PickupPointWrite, ShippingZoneWrite } from '../application/ports.j
 import type { JsonValue, OrderDto, OrderStatusMutationDto, RefundDto, SupplierDto, TransferReviewDto } from '../application/dtos.js';
 import type {
   AdminActor, AuditListQuery, CustomerListQuery, OrderListQuery, OrderStatusValue,
-  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierWrite,
+  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierWrite, LoyaltyProgramWrite,
 } from '../domain/admin-cms.js';
 import { allowedOrderTransitions } from '../domain/admin-cms.js';
+import { getLoyaltyProgram, mapLoyaltyProgram, releaseOrderLoyaltyReservation, reverseOrderLoyalty, settleOrderLoyalty } from '../../loyalty/index.js';
 
 type Coordinator = { run<T>(operation: () => Promise<T>): Promise<T> };
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -25,6 +26,14 @@ const dateRange = (range: 'TODAY' | '7D' | '30D') => {
   return new Date(now.getTime() - (range === '7D' ? 7 : 30) * 24 * 60 * 60 * 1000);
 };
 const cleanOptional = (value: string | null | undefined) => value === undefined ? undefined : value === null || value.trim() === '' ? null : value.trim();
+const emptyLoyaltyAccount = () => ({ balance: 0, reserved: 0, available: 0, lifetimeEarned: 0, lifetimeRedeemed: 0 });
+const mapLoyaltyAccount = (account: { balance: number; reserved: number; lifetimeEarned: number; lifetimeRedeemed: number } | null | undefined) => account ? {
+  balance: account.balance,
+  reserved: account.reserved,
+  available: Math.max(0, account.balance - account.reserved),
+  lifetimeEarned: account.lifetimeEarned,
+  lifetimeRedeemed: account.lifetimeRedeemed,
+} : emptyLoyaltyAccount();
 
 function validateProduct(input: ProductWrite | (ProductPatch & Partial<ProductWrite>), current?: { kind: string; stockMode: string; onHand: number; reserved: number }) {
   const kind = input.kind ?? current?.kind;
@@ -94,7 +103,16 @@ function mapOrder(value: OrderRecord): OrderDto {
   return {
     id: value.id, number: value.number, version: value.version, status: value.status,
     paymentMethod: value.paymentMethod, fulfillmentType: value.fulfillmentType,
-    totals: { subtotal: money(value.subtotalMinor, value.currency), shipping: money(value.shippingMinor, value.currency), total: money(value.totalMinor, value.currency) },
+    totals: { subtotal: money(value.subtotalMinor, value.currency), discount: money(value.pointsDiscountMinor, value.currency), shipping: money(value.shippingMinor, value.currency), total: money(value.totalMinor, value.currency) },
+    loyalty: {
+      programVersion: value.loyaltyProgramVersion,
+      pointsRedeemed: value.pointsRedeemed,
+      pointsDiscount: money(value.pointsDiscountMinor, value.currency),
+      pointsEarned: value.pointsEarned,
+      redemptionStatus: value.loyaltyRedemptionStatus,
+      spendPerPoint: value.loyaltySpendPerPointMinor === null ? null : money(value.loyaltySpendPerPointMinor, value.currency),
+      pointValue: value.loyaltyPointValueMinor === null ? null : money(value.loyaltyPointValueMinor, value.currency),
+    },
     customer: value.user,
     fulfillment: value.fulfillmentType === 'SHIPMENT' ? {
       type: 'SHIPMENT', shippingRateId: value.shippingRateId, zoneName: value.shippingZoneName,
@@ -417,6 +435,7 @@ export class PrismaAdminCmsTransactionStore {
       if (!['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(order.status)) throw conflict('ORDER_NOT_CANCELLABLE', 'Order cannot be cancelled');
       await updateOrderVersion(tx, order.id, expectedVersion, { status: 'CANCELLED' });
       await releaseReservations(tx, order.id);
+      await releaseOrderLoyaltyReservation(tx, order.id);
       await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'CANCELLED', note: note ?? 'Cancelled by administrator', changedById: actor.adminId } });
       await tx.auditLog.create({ data: auditData(actor, 'ORDER_CANCELLED', 'Order', order.id, { number, fromStatus: order.status }) });
       return { number, status: 'CANCELLED', version: expectedVersion + 1 };
@@ -453,6 +472,7 @@ export class PrismaAdminCmsTransactionStore {
         await tx.transferReceipt.update({ where: { id: receiptId }, data: { review: 'APPROVED', note, reviewedAt: now, reviewedById: actor.adminId } });
         await tx.transferReceipt.updateMany({ where: { orderId: order.id, id: { not: receiptId }, review: 'PENDING' }, data: { review: 'REJECTED', note: 'Superseded by approved receipt', reviewedAt: now, reviewedById: actor.adminId } });
         await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'PAID', note: note ?? 'Transfer approved', changedById: actor.adminId } });
+        await settleOrderLoyalty(tx, order.id);
       } else {
         await updateOrderVersion(tx, order.id, expectedVersion, { status: 'CANCELLED' });
         await releaseReservations(tx, order.id);
@@ -469,6 +489,7 @@ export class PrismaAdminCmsTransactionStore {
           },
         });
         await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'CANCELLED', note: note ?? 'Transfer rejected', changedById: actor.adminId } });
+        await releaseOrderLoyaltyReservation(tx, order.id);
       }
       await tx.auditLog.create({ data: auditData(actor, `TRANSFER_${decision}`, 'TransferReceipt', receiptId, { orderId: order.id, number }) });
       return { number, receiptId, decision, status: decision === 'APPROVED' ? 'PAID' : 'CANCELLED', version: expectedVersion + 1 };
@@ -492,6 +513,7 @@ export class PrismaAdminCmsTransactionStore {
       }
       await updateOrderVersion(tx, order.id, expectedVersion, { status: 'PAID' });
       await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'PAID', note: 'Late payment manually accepted after stock validation', changedById: actor.adminId } });
+      await settleOrderLoyalty(tx, order.id);
       await tx.auditLog.create({ data: auditData(actor, 'LATE_PAYMENT_FULFILLED', 'Order', order.id, { number }) });
       return { number, status: 'PAID', version: expectedVersion + 1 };
     }));
@@ -506,6 +528,7 @@ export class PrismaAdminCmsTransactionStore {
       await tx.payment.update({ where: { id: order.payment.id }, data: { status: 'REFUNDED' } });
       await updateOrderVersion(tx, order.id, expectedVersion, { status: 'REFUND_RECORDED' });
       await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'REFUND_RECORDED', note: `Full refund recorded: ${reason}`, changedById: actor.adminId } });
+      await reverseOrderLoyalty(tx, order.id);
       await tx.auditLog.create({ data: auditData(actor, 'FULL_REFUND_RECORDED', 'Order', order.id, { number, refundId: refund.id, externalReference }) });
       return { refundId: refund.id, number, status: 'REFUND_RECORDED', amount: money(refund.amountMinor, refund.currency), version: expectedVersion + 1 };
     }));
@@ -514,6 +537,38 @@ export class PrismaAdminCmsTransactionStore {
   async listPayments(query: OrderListQuery, queue?: 'TRANSFER_REVIEW' | 'MERCADO_PAGO_REVIEW') {
     const adjusted: OrderListQuery = { ...query, ...(queue === 'TRANSFER_REVIEW' ? { paymentMethod: 'BANK_TRANSFER', paymentStatus: 'UNDER_REVIEW' } : {}), ...(queue === 'MERCADO_PAGO_REVIEW' ? { paymentMethod: 'MERCADO_PAGO', paymentStatus: 'REQUIRES_REVIEW' } : {}) };
     return this.listOrders(adjusted);
+  }
+
+  async getLoyaltyProgram() {
+    return mapLoyaltyProgram(await getLoyaltyProgram(this.prisma));
+  }
+
+  updateLoyaltyProgram(actor: AdminActor, input: LoyaltyProgramWrite) {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const spendPerPointMinor = parseMinor(input.spendPerPointMinor);
+      const pointValueMinor = parseMinor(input.pointValueMinor);
+      if (spendPerPointMinor <= 0n || pointValueMinor <= 0n) throw badRequest('INVALID_LOYALTY_RULE', 'Los importes de fidelidad deben ser mayores a cero');
+      const changed = await tx.loyaltyProgram.updateMany({
+        where: { id: 'default', version: input.expectedVersion },
+        data: {
+          enabled: input.enabled,
+          spendPerPointMinor,
+          pointsPerStep: input.pointsPerStep,
+          pointValueMinor,
+          minimumRedemptionPoints: input.minimumRedemptionPoints,
+          maximumRedemptionPercent: input.maximumRedemptionPercent,
+          updatedById: actor.adminId,
+          version: { increment: 1 },
+        },
+      });
+      if (changed.count !== 1) {
+        if (!await tx.loyaltyProgram.count({ where: { id: 'default' } })) throw notFound('Loyalty program not found');
+        throw conflict('LOYALTY_PROGRAM_CHANGED', 'La configuración fue modificada por otro administrador');
+      }
+      const program = await getLoyaltyProgram(tx);
+      await tx.auditLog.create({ data: auditData(actor, 'LOYALTY_PROGRAM_UPDATED', 'LoyaltyProgram', program.id, { enabled: program.enabled, version: program.version, spendPerPointMinor: program.spendPerPointMinor.toString(), pointsPerStep: program.pointsPerStep, pointValueMinor: program.pointValueMinor.toString(), minimumRedemptionPoints: program.minimumRedemptionPoints, maximumRedemptionPercent: program.maximumRedemptionPercent }) });
+      return mapLoyaltyProgram(program);
+    }));
   }
 
   async getFulfillment() {
@@ -600,7 +655,7 @@ export class PrismaAdminCmsTransactionStore {
       ...(query.status ? { status: query.status } : {}),
       ...(query.verified === undefined ? {} : query.verified ? { emailVerifiedAt: { not: null } } : { emailVerifiedAt: null }),
     };
-    const rows = await this.prisma.user.findMany({ where, include: { _count: { select: { orders: true } } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: query.limit + 1, ...(query.cursor ? { skip: 1, cursor: { id: query.cursor } } : {}) });
+    const rows = await this.prisma.user.findMany({ where, include: { _count: { select: { orders: true } }, loyaltyAccount: true }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: query.limit + 1, ...(query.cursor ? { skip: 1, cursor: { id: query.cursor } } : {}) });
     const result = page(rows, query.limit, (value) => value.id);
     const paidTotals = result.data.length
       ? await this.prisma.order.groupBy({
@@ -613,7 +668,7 @@ export class PrismaAdminCmsTransactionStore {
     return {
       data: result.data.map((user) => ({
         id: user.id, email: user.email, name: user.name, status: user.status, emailVerifiedAt: user.emailVerifiedAt,
-        createdAt: user.createdAt, ordersCount: user._count.orders, paidTotal: money(paidByUser.get(user.id) ?? 0n),
+        createdAt: user.createdAt, ordersCount: user._count.orders, paidTotal: money(paidByUser.get(user.id) ?? 0n), loyalty: mapLoyaltyAccount(user.loyaltyAccount),
       })),
       nextCursor: result.nextCursor,
     };
@@ -625,6 +680,7 @@ export class PrismaAdminCmsTransactionStore {
         where: { id },
         include: {
           _count: { select: { orders: true } },
+          loyaltyAccount: true,
           orders: { include: orderDetailInclude, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 20 },
         },
       }),
@@ -638,7 +694,7 @@ export class PrismaAdminCmsTransactionStore {
       customer: {
         id: customer.id, email: customer.email, name: customer.name, status: customer.status,
         emailVerifiedAt: customer.emailVerifiedAt, createdAt: customer.createdAt, updatedAt: customer.updatedAt,
-        ordersCount: customer._count.orders, paidTotal: money(paid._sum.totalMinor ?? 0n),
+        ordersCount: customer._count.orders, paidTotal: money(paid._sum.totalMinor ?? 0n), loyalty: mapLoyaltyAccount(customer.loyaltyAccount),
         orders: customer.orders.map(mapOrder),
       },
     };

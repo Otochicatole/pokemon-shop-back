@@ -5,10 +5,12 @@ import type {
   ProductImageOrderDto, ProductImagesDto, ProductImageUpdateDto, ProductStatusDto, RefundDto,
   ShippingZoneResultDto, TransferReviewDto,
   SupplierActiveMutationDto, SupplierDetailDto, SupplierDto,
+  LoyaltyProgramDto,
 } from './dtos.js';
 import type {
   AdminActor, AuditListQuery, CustomerListQuery, OrderListQuery, OrderStatusValue,
   ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierWrite,
+  LoyaltyProgramWrite,
 } from '../domain/admin-cms.js';
 
 export interface DashboardReader {
@@ -75,6 +77,11 @@ export interface SupplierAdminRepository {
   setSupplierActive(actor: AdminActor, id: string, active: boolean, expectedVersion: number): Promise<SupplierActiveMutationDto>;
 }
 
+export interface LoyaltyAdminRepository {
+  getLoyaltyProgram(): Promise<LoyaltyProgramDto>;
+  updateLoyaltyProgram(actor: AdminActor, input: LoyaltyProgramWrite): Promise<LoyaltyProgramDto>;
+}
+
 export type AdminCmsRepositories = {
   dashboard: DashboardReader;
   products: ProductAdminRepository;
@@ -85,6 +92,7 @@ export type AdminCmsRepositories = {
   customers: CustomerAdminRepository;
   audit: AuditAdminRepository;
   suppliers: SupplierAdminRepository;
+  loyalty: LoyaltyAdminRepository;
 };
 
 export type ShippingZoneWrite = {

@@ -59,6 +59,16 @@ export type SupplierWrite = {
 
 export type SupplierPatch = Partial<SupplierWrite> & { expectedVersion: number };
 
+export type LoyaltyProgramWrite = {
+  enabled: boolean;
+  spendPerPointMinor: string;
+  pointsPerStep: number;
+  pointValueMinor: string;
+  minimumRedemptionPoints: number;
+  maximumRedemptionPercent: number;
+  expectedVersion: number;
+};
+
 export type ProductListQuery = CursorPage & {
   search?: string;
   status?: ProductStatusValue;

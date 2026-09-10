@@ -10,6 +10,7 @@ import {
   pickupPointWriteSchema, productImageParamsSchema, productListQuerySchema, productPatchSchema,
   productWriteSchema, refundSchema, shippingZoneWriteSchema, supplierActiveSchema, supplierListQuerySchema,
   supplierPatchSchema, supplierWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
+  loyaltyProgramWriteSchema,
 } from './admin-cms-schemas.js';
 
 const noContent = (response: import('express').Response) => response.status(204).send();
@@ -30,6 +31,9 @@ export function createAdminCmsRouter({ application, upload, requireAdmin, actorF
   router.use(requireAdmin);
 
   router.get('/dashboard', async (req, res) => res.json(await application.dashboard.get(dashboardQuerySchema.parse(req.query).range)));
+
+  router.get('/loyalty/config', async (_req, res) => res.json(await application.loyalty.get()));
+  router.patch('/loyalty/config', async (req, res) => res.json(await application.loyalty.update(actorFromRequest(req), loyaltyProgramWriteSchema.parse(req.body))));
 
   router.get('/products', async (req, res) => res.json(await application.products.list(productListQuerySchema.parse(req.query))));
   router.post('/products', async (req, res) => {

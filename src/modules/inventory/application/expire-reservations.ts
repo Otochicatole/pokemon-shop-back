@@ -1,5 +1,6 @@
 import type { PrismaClient, Prisma } from '@prisma/client';
 import { OrderStatus } from '@prisma/client';
+import { releaseOrderLoyaltyReservation } from '../../loyalty/index.js';
 
 export interface ReservationExpiryDependencies {
   prisma: PrismaClient;
@@ -18,6 +19,7 @@ export class ExpireReservations {
         await tx.order.update({ where: { id: current.id }, data: { status: OrderStatus.EXPIRED } });
         await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: OrderStatus.EXPIRED, note: 'Payment window expired' } });
         await releaseReservations(tx, current.id, now);
+        await releaseOrderLoyaltyReservation(tx, current.id);
       }));
     }
   }

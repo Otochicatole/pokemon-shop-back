@@ -3,13 +3,13 @@ import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import {
   activeSchema, auditListQuerySchema, cursorQuerySchema, customerListQuerySchema, dashboardQuerySchema,
   expectedVersionSchema, idParamsSchema, imageOrderSchema, imagePatchSchema, imageUploadFieldsSchema, inventoryAdjustmentSchema,
-  orderActionSchema, orderListQuerySchema, orderParamsSchema, orderTransitionSchema, paymentsQuerySchema,
+  loyaltyProgramWriteSchema, orderActionSchema, orderListQuerySchema, orderParamsSchema, orderTransitionSchema, paymentsQuerySchema,
   pickupPointWriteSchema, productImageParamsSchema, productListQuerySchema, productPatchSchema,
   productWriteSchema, refundSchema, shippingZoneWriteSchema, supplierActiveSchema, supplierListQuerySchema,
   supplierPatchSchema, supplierWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
   adminActiveMutationDataSchema, adminAuditEntrySchema, adminCustomerDetailDataSchema, adminCustomerSummarySchema,
   adminDashboardDataSchema, adminEnvelopeSchema, adminFulfillmentDataSchema, adminFullRefundDataSchema,
-  adminInventoryAdjustmentSchema, adminInventoryMutationDataSchema, adminOrderDetailDataSchema, adminOrderSchema,
+  adminInventoryAdjustmentSchema, adminInventoryMutationDataSchema, adminLoyaltyProgramSchema, adminOrderDetailDataSchema, adminOrderSchema,
   adminOrderStatusDataSchema, adminPickupPointResultDataSchema, adminProductDetailDataSchema, adminProductImageOrderDataSchema,
   adminProductImagesDataSchema, adminProductImageUpdateDataSchema, adminProductSchema, adminProductStatusDataSchema,
   adminShippingZoneResultDataSchema, adminTransferReviewDataSchema,
@@ -41,8 +41,12 @@ export function registerAdminCmsPaths(registry: OpenAPIRegistry, { problemSchema
   registry.register('AdminPickupPointWrite', pickupPointWriteSchema);
   registry.register('AdminSupplierWrite', supplierWriteSchema);
   registry.register('AdminSupplierPatch', supplierPatchSchema);
+  registry.register('AdminLoyaltyProgramWrite', loyaltyProgramWriteSchema);
+  registry.register('AdminLoyaltyProgram', adminLoyaltyProgramSchema);
 
   registry.registerPath({ method: 'get', path: '/api/v2/admin/dashboard', tags: ['Admin dashboard'], summary: 'Read operational and commercial metrics', security, request: { query: dashboardQuerySchema }, responses: ok('Dashboard for the selected date range', adminDashboardDataSchema) });
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/loyalty/config', tags: ['Admin loyalty'], summary: 'Read the configurable earning and redemption rules', security, responses: ok('Current loyalty program configuration', adminLoyaltyProgramSchema) });
+  registry.registerPath({ method: 'patch', path: '/api/v2/admin/loyalty/config', tags: ['Admin loyalty'], summary: 'Update loyalty rules using optimistic concurrency', security, request: { headers: csrf, body: json(loyaltyProgramWriteSchema) }, responses: ok('Loyalty program configuration updated', adminLoyaltyProgramSchema) });
 
   registry.registerPath({ method: 'get', path: '/api/v2/admin/products', tags: ['Admin products'], summary: 'List products in every publication state', security, request: { query: productListQuerySchema }, responses: ok('Cursor page of products', z.array(adminProductSchema)) });
   registry.registerPath({ method: 'post', path: '/api/v2/admin/products', tags: ['Admin products'], summary: 'Create a draft product and initial inventory', security, request: { headers: csrf, body: json(productWriteSchema) }, responses: created('Draft product created', adminProductDetailDataSchema) });

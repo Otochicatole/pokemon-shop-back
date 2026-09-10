@@ -94,3 +94,13 @@ export const supplierListQuerySchema = cursorQuery.extend({ search: optionalText
 export const customerListQuerySchema = cursorQuery.extend({ search: optionalText(180), status: z.enum(['ACTIVE', 'SUSPENDED']).optional(), verified: booleanQuery });
 export const auditListQuerySchema = cursorQuery.extend({ actorId: z.string().uuid().optional(), action: optionalText(100), entityType: optionalText(100), requestId: optionalText(150), from: dateQuery, to: dateQuery });
 export const dashboardQuerySchema = z.object({ range: z.enum(['TODAY', '7D', '30D']).default('7D') });
+
+export const loyaltyProgramWriteSchema = z.object({
+  enabled: z.boolean(),
+  spendPerPointMinor: z.string().regex(/^[1-9]\d{0,14}$/),
+  pointsPerStep: z.number().int().min(1).max(100),
+  pointValueMinor: z.string().regex(/^[1-9]\d{0,14}$/),
+  minimumRedemptionPoints: z.number().int().min(1).max(2_000_000_000),
+  maximumRedemptionPercent: z.number().int().min(1).max(90),
+  expectedVersion: z.number().int().min(1),
+});

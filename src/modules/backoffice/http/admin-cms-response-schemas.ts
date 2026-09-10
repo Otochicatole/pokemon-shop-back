@@ -11,6 +11,17 @@ export const adminMoneySchema = z.object({ amountMinor: z.string().regex(/^\d+$/
 export const adminMetaSchema = z.object({ nextCursor: z.string().nullable().optional() });
 export const adminEnvelopeSchema = <T extends z.ZodTypeAny>(data: T) => z.object({ data, meta: adminMetaSchema });
 
+export const adminLoyaltyAccountSchema = z.object({
+  balance: z.number().int(), reserved: z.number().int().nonnegative(), available: z.number().int().nonnegative(),
+  lifetimeEarned: z.number().int().nonnegative(), lifetimeRedeemed: z.number().int().nonnegative(),
+});
+export const adminLoyaltyProgramSchema = z.object({
+  enabled: z.boolean(), currency: z.literal('ARS'), spendPerPoint: adminMoneySchema,
+  pointsPerStep: z.number().int().positive(), pointValue: adminMoneySchema,
+  minimumRedemptionPoints: z.number().int().positive(), maximumRedemptionPercent: z.number().int().min(1).max(90),
+  version: z.number().int().positive(), updatedAt: dateTime,
+});
+
 export const adminProductImageSchema = z.object({
   id: z.string().uuid(), fileId: z.string().uuid(), url: z.string(), altText: z.string().nullable(),
   sortOrder: z.number().int(), createdAt: dateTime.optional(),
@@ -100,7 +111,12 @@ const adminTimelineSchema = z.object({
 export const adminOrderSchema = z.object({
   id: z.string().uuid(), number: z.string(), version: z.number().int(), status: z.enum(orderStatuses),
   paymentMethod: z.enum(paymentMethods), fulfillmentType: z.enum(['SHIPMENT', 'PICKUP']),
-  totals: z.object({ subtotal: adminMoneySchema, shipping: adminMoneySchema, total: adminMoneySchema }),
+  totals: z.object({ subtotal: adminMoneySchema, discount: adminMoneySchema, shipping: adminMoneySchema, total: adminMoneySchema }),
+  loyalty: z.object({
+    programVersion: z.number().int().nullable(), pointsRedeemed: z.number().int().nonnegative(), pointsDiscount: adminMoneySchema,
+    pointsEarned: z.number().int().nonnegative(), redemptionStatus: z.enum(['NONE', 'RESERVED', 'REDEEMED', 'RELEASED', 'RESTORED']),
+    spendPerPoint: adminMoneySchema.nullable(), pointValue: adminMoneySchema.nullable(),
+  }),
   customer: adminOrderCustomerSchema, fulfillment: z.discriminatedUnion('type', [adminShipmentSchema, adminPickupSchema]),
   items: z.array(adminOrderItemSchema), reservations: z.array(adminReservationSchema), payment: adminPaymentSchema.nullable(),
   receipts: z.array(adminReceiptSchema), timeline: z.array(adminTimelineSchema), allowedActions: z.array(z.string()),
@@ -137,10 +153,10 @@ export const adminSupplierSchema = z.object({
 export const adminSupplierDetailDataSchema = z.object({ supplier: adminSupplierSchema });
 export const adminSupplierActiveMutationDataSchema = z.object({ id: z.string().uuid(), active: z.boolean(), version: z.number().int() });
 
-export const adminCustomerSummarySchema = adminOrderCustomerSchema.extend({ ordersCount: z.number().int(), paidTotal: adminMoneySchema });
+export const adminCustomerSummarySchema = adminOrderCustomerSchema.extend({ ordersCount: z.number().int(), paidTotal: adminMoneySchema, loyalty: adminLoyaltyAccountSchema });
 export const adminCustomerDetailDataSchema = z.object({
   customer: adminOrderCustomerSchema.extend({
-    updatedAt: dateTime, ordersCount: z.number().int(), paidTotal: adminMoneySchema, orders: z.array(adminOrderSchema).max(20),
+    updatedAt: dateTime, ordersCount: z.number().int(), paidTotal: adminMoneySchema, loyalty: adminLoyaltyAccountSchema, orders: z.array(adminOrderSchema).max(20),
   }),
 });
 export const adminAuditEntrySchema = z.object({
