@@ -1,3 +1,15 @@
-export interface NotificationsModule {
-  dispatchPending(): Promise<void>;
-}
+export {
+  createAdminNotifications,
+  createNotificationsRouters,
+  createOrderCreatedNotifications,
+  createOrderStatusNotification,
+  createPaymentApprovedNotifications,
+  createPaymentReviewNotifications,
+  createReceiptSubmittedNotifications,
+  createSupportNotification,
+  getNotificationUnreadCount,
+  mapNotification,
+  publishNotifications,
+  statusLabel,
+  type NotificationCreateInput,
+} from './notifications.js';

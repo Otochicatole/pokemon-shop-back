@@ -118,6 +118,7 @@ export class SupportRealtimeHub {
 type AttachSupportWebSocketOptions = {
   hub: SupportRealtimeHub;
   getUnreadCount(actor: SupportRealtimeActor): Promise<number>;
+  getNotificationUnreadCount?: (actor: SupportRealtimeActor) => Promise<number>;
 };
 
 function parseCookies(header: string | undefined): Record<string, string> {
@@ -201,7 +202,7 @@ function handleClientMessage(socket: WebSocket, raw: RawData): void {
 
 export function attachSupportWebSocketServer(
   server: HttpServer,
-  { hub, getUnreadCount }: AttachSupportWebSocketOptions,
+  { hub, getUnreadCount, getNotificationUnreadCount }: AttachSupportWebSocketOptions,
 ) {
   const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 2_048 });
   const socketAlive = new WeakMap<WebSocket, boolean>();
@@ -220,7 +221,9 @@ export function attachSupportWebSocketServer(
   const onUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     void (async () => {
       const url = new URL(request.url ?? '/', 'http://localhost');
-      if (url.pathname !== '/api/v2/support/ws') {
+      const isSupportPath = url.pathname === '/api/v2/support/ws';
+      const isNotificationsPath = url.pathname === '/api/v2/notifications/ws';
+      if (!isSupportPath && !isNotificationsPath) {
         rejectUpgrade(socket, 404, 'Not Found');
         return;
       }
@@ -273,11 +276,18 @@ export function attachSupportWebSocketServer(
               return;
             }
             if (!registration.activate()) return;
-            const unreadCount = await getUnreadCount(actor);
+            const supportUnreadCount = await getUnreadCount(actor);
+            const notificationUnreadCount = getNotificationUnreadCount ? await getNotificationUnreadCount(actor) : 0;
             if (webSocket.readyState !== WebSocket.OPEN) return;
             webSocket.send(JSON.stringify({
               type: 'connection.ready',
-              payload: { actorType: actor.type, actorId: actor.id, unreadCount },
+              payload: {
+                actorType: actor.type,
+                actorId: actor.id,
+                unreadCount: isNotificationsPath ? notificationUnreadCount : supportUnreadCount,
+                supportUnreadCount,
+                notificationUnreadCount,
+              },
               sentAt: new Date().toISOString(),
             } satisfies SupportRealtimeEvent));
           })

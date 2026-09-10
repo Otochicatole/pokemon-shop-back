@@ -11,6 +11,8 @@ import { allowedOrderTransitions } from '../domain/admin-cms.js';
 import { getLoyaltyProgram, mapLoyaltyProgram, releaseOrderLoyaltyReservation, reverseOrderLoyalty, settleOrderLoyalty } from '../../loyalty/index.js';
 import { BASE_CURRENCY } from '../../../shared/currency.js';
 import type { BaseCurrency } from '../../../shared/currency.js';
+import type { SupportRealtimeHub } from '../../support/support-realtime.js';
+import { createOrderStatusNotification, publishNotifications } from '../../notifications/index.js';
 
 type Coordinator = { run<T>(operation: () => Promise<T>): Promise<T> };
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -173,7 +175,7 @@ function redact(value: JsonValue): JsonValue {
 }
 
 export class PrismaAdminCmsTransactionStore {
-  public constructor(private readonly prisma: PrismaClient, private readonly coordinator: Coordinator) {}
+  public constructor(private readonly prisma: PrismaClient, private readonly coordinator: Coordinator, private readonly realtime?: SupportRealtimeHub) {}
 
   async dashboard(range: 'TODAY' | '7D' | '30D') {
     const since = dateRange(range);
@@ -450,21 +452,26 @@ export class PrismaAdminCmsTransactionStore {
   }
 
   cancelOrder(actor: AdminActor, number: string, expectedVersion: number, note?: string): Promise<OrderStatusMutationDto> {
-    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+    return this.coordinator.run(async () => {
+      const outcome = await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { number } });
       if (!order) throw notFound('Order not found');
       if (!['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(order.status)) throw conflict('ORDER_NOT_CANCELLABLE', 'Order cannot be cancelled');
       await updateOrderVersion(tx, order.id, expectedVersion, { status: 'CANCELLED' });
       await releaseReservations(tx, order.id);
       await releaseOrderLoyaltyReservation(tx, order.id);
-      await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'CANCELLED', note: note ?? 'Cancelled by administrator', changedById: actor.adminId } });
+      const history = await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'CANCELLED', note: note ?? 'Cancelled by administrator', changedById: actor.adminId } });
       await tx.auditLog.create({ data: auditData(actor, 'ORDER_CANCELLED', 'Order', order.id, { number, fromStatus: order.status }) });
-      return { number, status: 'CANCELLED', version: expectedVersion + 1 };
-    }));
+      return { result: { number, status: 'CANCELLED', version: expectedVersion + 1 } as OrderStatusMutationDto, notificationIds: [(await createOrderStatusNotification(tx, order, history)).id] };
+      });
+      if (this.realtime && outcome.notificationIds.length) await publishNotifications(this.prisma, this.realtime, outcome.notificationIds);
+      return outcome.result;
+    });
   }
 
   transitionOrder(actor: AdminActor, number: string, expectedVersion: number, status: OrderStatusValue, note?: string) {
-    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+    return this.coordinator.run(async () => {
+      const outcome = await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { number }, include: { statusHistory: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] } } });
       if (!order) throw notFound('Order not found');
       const isRollback = rollbackTarget(order) === status;
@@ -472,20 +479,25 @@ export class PrismaAdminCmsTransactionStore {
       if (status === 'READY_FOR_PICKUP' && order.fulfillmentType !== 'PICKUP') throw conflict('INVALID_FULFILLMENT_TRANSITION', 'Only pickup orders can become ready for pickup');
       if (status === 'SHIPPED' && order.fulfillmentType !== 'SHIPMENT') throw conflict('INVALID_FULFILLMENT_TRANSITION', 'Only shipment orders can be shipped');
       await updateOrderVersion(tx, order.id, expectedVersion, { status });
-      await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: status, note: note ?? (isRollback ? `Manual rollback to ${status}` : undefined), changedById: actor.adminId } });
+      const history = await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: status, note: note ?? (isRollback ? `Manual rollback to ${status}` : undefined), changedById: actor.adminId } });
       await tx.auditLog.create({ data: auditData(actor, isRollback ? 'ORDER_STATUS_ROLLED_BACK' : 'ORDER_STATUS_CHANGED', 'Order', order.id, { number, fromStatus: order.status, toStatus: status }) });
-      return { number, status, version: expectedVersion + 1 };
-    }));
+      return { result: { number, status, version: expectedVersion + 1 } as OrderStatusMutationDto, notificationIds: [(await createOrderStatusNotification(tx, order, history)).id] };
+      });
+      if (this.realtime && outcome.notificationIds.length) await publishNotifications(this.prisma, this.realtime, outcome.notificationIds);
+      return outcome.result;
+    });
   }
 
   reviewTransfer(actor: AdminActor, number: string, receiptId: string, expectedVersion: number, decision: 'APPROVED' | 'REJECTED', note?: string): Promise<TransferReviewDto> {
-    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+    return this.coordinator.run(async () => {
+      const outcome = await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { number }, include: { payment: { include: { transfer: true } }, transferReceipts: true } });
       if (!order?.payment?.transfer || order.paymentMethod !== 'BANK_TRANSFER') throw notFound('Bank transfer order not found');
       const receipt = order.transferReceipts.find((value) => value.id === receiptId);
       if (!receipt) throw notFound('Transfer receipt not found');
       if (receipt.review !== 'PENDING' || !['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(order.status)) throw conflict('TRANSFER_NOT_REVIEWABLE', 'Transfer receipt is no longer reviewable');
       const now = new Date();
+      let notificationIds: string[] = [];
       if (decision === 'APPROVED') {
         await consumeReservations(tx, order.id);
         await updateOrderVersion(tx, order.id, expectedVersion, { status: 'PAID' });
@@ -493,7 +505,8 @@ export class PrismaAdminCmsTransactionStore {
         await tx.bankTransfer.update({ where: { id: order.payment.transfer.id }, data: { reviewStatus: 'APPROVED', reviewedAt: now, reviewedById: actor.adminId } });
         await tx.transferReceipt.update({ where: { id: receiptId }, data: { review: 'APPROVED', note, reviewedAt: now, reviewedById: actor.adminId } });
         await tx.transferReceipt.updateMany({ where: { orderId: order.id, id: { not: receiptId }, review: 'PENDING' }, data: { review: 'REJECTED', note: 'Superseded by approved receipt', reviewedAt: now, reviewedById: actor.adminId } });
-        await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'PAID', note: note ?? 'Transfer approved', changedById: actor.adminId } });
+        const history = await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'PAID', note: note ?? 'Transfer approved', changedById: actor.adminId } });
+        notificationIds.push((await createOrderStatusNotification(tx, order, history)).id);
         await settleOrderLoyalty(tx, order.id);
       } else {
         await updateOrderVersion(tx, order.id, expectedVersion, { status: 'CANCELLED' });
@@ -510,16 +523,21 @@ export class PrismaAdminCmsTransactionStore {
             reviewedById: actor.adminId,
           },
         });
-        await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'CANCELLED', note: note ?? 'Transfer rejected', changedById: actor.adminId } });
+        const history = await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'CANCELLED', note: note ?? 'Transfer rejected', changedById: actor.adminId } });
+        notificationIds.push((await createOrderStatusNotification(tx, order, history)).id);
         await releaseOrderLoyaltyReservation(tx, order.id);
       }
       await tx.auditLog.create({ data: auditData(actor, `TRANSFER_${decision}`, 'TransferReceipt', receiptId, { orderId: order.id, number }) });
-      return { number, receiptId, decision, status: decision === 'APPROVED' ? 'PAID' : 'CANCELLED', version: expectedVersion + 1 };
-    }));
+      return { result: { number, receiptId, decision, status: decision === 'APPROVED' ? 'PAID' : 'CANCELLED', version: expectedVersion + 1 } as TransferReviewDto, notificationIds };
+      });
+      if (this.realtime && outcome.notificationIds.length) await publishNotifications(this.prisma, this.realtime, outcome.notificationIds);
+      return outcome.result;
+    });
   }
 
   fulfillLatePayment(actor: AdminActor, number: string, expectedVersion: number): Promise<OrderStatusMutationDto> {
-    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+    return this.coordinator.run(async () => {
+      const outcome = await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { number }, include: { payment: true, reservations: true } });
       if (!order?.payment) throw notFound('Order not found');
       if (order.status !== 'PAYMENT_REQUIRES_REVIEW' || order.payment.status !== 'APPROVED') throw conflict('LATE_PAYMENT_NOT_FULFILLABLE', 'Payment is not an approved late payment');
@@ -534,26 +552,33 @@ export class PrismaAdminCmsTransactionStore {
         await tx.inventoryReservation.update({ where: { id: reservation.id }, data: { releasedAt: null, consumedAt: new Date() } });
       }
       await updateOrderVersion(tx, order.id, expectedVersion, { status: 'PAID' });
-      await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'PAID', note: 'Late payment manually accepted after stock validation', changedById: actor.adminId } });
+      const history = await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'PAID', note: 'Late payment manually accepted after stock validation', changedById: actor.adminId } });
       await settleOrderLoyalty(tx, order.id);
       await tx.auditLog.create({ data: auditData(actor, 'LATE_PAYMENT_FULFILLED', 'Order', order.id, { number }) });
-      return { number, status: 'PAID', version: expectedVersion + 1 };
-    }));
+      return { result: { number, status: 'PAID', version: expectedVersion + 1 } as OrderStatusMutationDto, notificationIds: [(await createOrderStatusNotification(tx, order, history)).id] };
+      });
+      if (this.realtime && outcome.notificationIds.length) await publishNotifications(this.prisma, this.realtime, outcome.notificationIds);
+      return outcome.result;
+    });
   }
 
   recordFullRefund(actor: AdminActor, number: string, expectedVersion: number, reason: string, externalReference: string): Promise<RefundDto> {
-    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+    return this.coordinator.run(async () => {
+      const outcome = await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { number }, include: { payment: { include: { refunds: true } } } });
       if (!order?.payment) throw notFound('Order not found');
       if (!['APPROVED', 'REQUIRES_REVIEW'].includes(order.payment.status) || order.payment.refunds.length) throw conflict('ORDER_NOT_REFUNDABLE', 'Order does not have a refundable payment');
       const refund = await tx.refundRecord.create({ data: { paymentId: order.payment.id, fullRefundKey: order.payment.id, amountMinor: order.payment.amountMinor, currency: BASE_CURRENCY, reason, externalReference, createdById: actor.adminId } });
       await tx.payment.update({ where: { id: order.payment.id }, data: { status: 'REFUNDED' } });
       await updateOrderVersion(tx, order.id, expectedVersion, { status: 'REFUND_RECORDED' });
-      await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'REFUND_RECORDED', note: `Full refund recorded: ${reason}`, changedById: actor.adminId } });
+      const history = await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'REFUND_RECORDED', note: `Full refund recorded: ${reason}`, changedById: actor.adminId } });
       await reverseOrderLoyalty(tx, order.id);
       await tx.auditLog.create({ data: auditData(actor, 'FULL_REFUND_RECORDED', 'Order', order.id, { number, refundId: refund.id, externalReference }) });
-      return { refundId: refund.id, number, status: 'REFUND_RECORDED', amount: money(refund.amountMinor, BASE_CURRENCY), version: expectedVersion + 1 };
-    }));
+      return { result: { refundId: refund.id, number, status: 'REFUND_RECORDED', amount: money(refund.amountMinor, BASE_CURRENCY), version: expectedVersion + 1 } as RefundDto, notificationIds: [(await createOrderStatusNotification(tx, order, history)).id] };
+      });
+      if (this.realtime && outcome.notificationIds.length) await publishNotifications(this.prisma, this.realtime, outcome.notificationIds);
+      return outcome.result;
+    });
   }
 
   async listPayments(query: OrderListQuery, queue?: 'TRANSFER_REVIEW' | 'MERCADO_PAGO_REVIEW') {

@@ -16,6 +16,7 @@ import { createMediaRouter, createRetiredImageCleanup, discardUnattachedFile, sa
 import { createDocsRouter } from '../modules/docs/index.js';
 import { createLoyaltyRouter } from '../modules/loyalty/index.js';
 import { createSupportRouters, SupportRealtimeHub } from '../modules/support/index.js';
+import { createNotificationsRouters } from '../modules/notifications/index.js';
 import { PrismaUnitOfWork } from '../shared/infrastructure/prisma-unit-of-work.js';
 
 export interface CompositionRoot {
@@ -33,6 +34,8 @@ export interface CompositionRoot {
     loyalty: ReturnType<typeof createLoyaltyRouter>;
     support: ReturnType<typeof createSupportRouters>['userRouter'];
     adminSupport: ReturnType<typeof createSupportRouters>['adminRouter'];
+    notifications: ReturnType<typeof createNotificationsRouters>['userRouter'];
+    adminNotifications: ReturnType<typeof createNotificationsRouters>['adminRouter'];
     backoffice: ReturnType<typeof createAdminCmsRouter>;
     media: ReturnType<typeof createMediaRouter>;
     docs: ReturnType<typeof createDocsRouter>;
@@ -44,7 +47,8 @@ export function createCompositionRoot(): CompositionRoot {
     storage: multer.memoryStorage(),
     limits: { fileSize: 10 * 1024 * 1024, files: 8, fields: 20, parts: 30, fieldNameSize: 100, fieldSize: 100_000 },
   });
-  const backofficeRepositories = createPrismaAdminCmsRepositories(prisma, writeCoordinator);
+  const supportRealtime = new SupportRealtimeHub();
+  const backofficeRepositories = createPrismaAdminCmsRepositories(prisma, writeCoordinator, supportRealtime);
   const backofficeApplication = createAdminCmsApplication(backofficeRepositories, {
     integrations: {
       bankTransfer: Boolean(env.BANK_NAME && env.BANK_ACCOUNT_HOLDER && (env.BANK_CBU || env.BANK_ALIAS)),
@@ -53,8 +57,8 @@ export function createCompositionRoot(): CompositionRoot {
     },
   });
   const retiredImageCleanup = createRetiredImageCleanup(prisma, writeCoordinator, env.STORAGE_ROOT);
-  const supportRealtime = new SupportRealtimeHub();
   const supportRouters = createSupportRouters(prisma, writeCoordinator, supportRealtime);
+  const notificationRouters = createNotificationsRouters(prisma, supportRealtime);
   const onSessionRevoked = (revocation: { actorType: 'USER' | 'ADMIN'; sessionId: string }) => {
     supportRealtime.closeSession(revocation.actorType, revocation.sessionId);
   };
@@ -85,10 +89,12 @@ export function createCompositionRoot(): CompositionRoot {
       customerAccess: createAuthRouter(prisma, { onSessionRevoked }),
       adminAccess: createAdminAuthRouter(prisma, { onSessionRevoked }),
       catalog: createCatalogV2Router(new PrismaCatalogRepository(prisma)),
-      commerce: createOrdersRouter(prisma, upload),
+      commerce: createOrdersRouter(prisma, upload, supportRealtime),
       loyalty: createLoyaltyRouter(prisma),
       support: supportRouters.userRouter,
       adminSupport: supportRouters.adminRouter,
+      notifications: notificationRouters.userRouter,
+      adminNotifications: notificationRouters.adminRouter,
       backoffice: backofficeRouter,
       media: createMediaRouter(prisma),
       docs: createDocsRouter(),

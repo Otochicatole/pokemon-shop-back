@@ -7,6 +7,7 @@ import { ensureStorage } from './modules/media/index.js';
 import { logger } from './infrastructure/logger.js';
 import { ExpireReservations } from './modules/inventory/index.js';
 import { attachSupportWebSocketServer, getSupportUnreadCount } from './modules/support/index.js';
+import { getNotificationUnreadCount } from './modules/notifications/index.js';
 
 const lockPath = path.resolve(env.STORAGE_ROOT, 'app.lock');
 
@@ -56,7 +57,7 @@ let mediaCleanupRunning: Promise<void> | null = null;
 
 function expireOrders(): Promise<void> {
   if (expirationRunning) return expirationRunning;
-  expirationRunning = new ExpireReservations({ prisma, writeCoordinator }).execute()
+  expirationRunning = new ExpireReservations({ prisma, writeCoordinator, realtime: composition.realtime.support }).execute()
     .then(() => undefined)
     .finally(() => { expirationRunning = null; });
   return expirationRunning;
@@ -85,6 +86,7 @@ async function main() {
   const supportWebSocketServer = attachSupportWebSocketServer(server, {
     hub: composition.realtime.support,
     getUnreadCount: (actor) => getSupportUnreadCount(prisma, actor),
+    getNotificationUnreadCount: (actor) => getNotificationUnreadCount(prisma, actor),
   });
   let shuttingDown = false;
   const shutdown = async () => {

@@ -10,6 +10,7 @@ import { PaymentAdminRepositoryAdapter } from './repositories/payment-admin-repo
 import { ProductAdminRepositoryAdapter } from './repositories/product-admin-repository.js';
 import { SupplierAdminRepositoryAdapter } from './repositories/supplier-admin-repository.js';
 import { LoyaltyAdminRepositoryAdapter } from './repositories/loyalty-admin-repository.js';
+import type { SupportRealtimeHub } from '../../support/support-realtime.js';
 
 export type WriteCoordinator = { run<T>(operation: () => Promise<T>): Promise<T> };
 
@@ -18,8 +19,8 @@ export type WriteCoordinator = { run<T>(operation: () => Promise<T>): Promise<T>
  * use the same SQLite coordinator and Prisma transaction. Narrow adapters keep every use
  * case dependent only on its own capability port.
  */
-export function createPrismaAdminCmsRepositories(prisma: PrismaClient, coordinator: WriteCoordinator): AdminCmsRepositories {
-  const store = new PrismaAdminCmsTransactionStore(prisma, coordinator);
+export function createPrismaAdminCmsRepositories(prisma: PrismaClient, coordinator: WriteCoordinator, realtime?: SupportRealtimeHub): AdminCmsRepositories {
+  const store = new PrismaAdminCmsTransactionStore(prisma, coordinator, realtime);
   return {
     dashboard: new DashboardReaderAdapter(store),
     products: new ProductAdminRepositoryAdapter(store),

@@ -18,6 +18,7 @@ import {
   type SupportStatus,
 } from './support-schemas.js';
 import { SupportRealtimeHub, type SupportRealtimeActor } from './support-realtime.js';
+import { createSupportNotification, getNotificationUnreadCount, publishNotifications } from '../notifications/index.js';
 
 type SupportDb = PrismaClient | Prisma.TransactionClient;
 type SupportActor = SupportRealtimeActor & { name: string; requestId?: string };
@@ -253,6 +254,14 @@ class SupportNotifier {
       });
     }
   }
+
+  async notificationCreated(ids: string[]): Promise<void> {
+    await publishNotifications(this.db, this.hub, ids);
+  }
+
+  async notificationCountChanged(actor: SupportRealtimeActor): Promise<void> {
+    this.hub.send(actor, 'notifications.unread_count', { count: await getNotificationUnreadCount(this.db, actor) });
+  }
 }
 
 async function safelyNotify(operation: Promise<void>, action: string): Promise<void> {
@@ -338,7 +347,7 @@ async function createConversation(
           && duplicate.conversation.subject === input.subject
           && duplicate.content === input.message;
         if (!exactRetry) throw conflict('SUPPORT_MESSAGE_ID_REUSED', 'El identificador del mensaje ya fue utilizado');
-        return { conversationId: duplicate.conversation.id, message: duplicate, created: false };
+        return { conversationId: duplicate.conversation.id, message: duplicate, created: false, notificationIds: [] as string[] };
       }
     }
     const user = await tx.user.findFirst({
@@ -373,6 +382,9 @@ async function createConversation(
     await tx.supportConversationRead.create({
       data: { conversationId: conversation.id, actorType: actor.type, actorId: actor.id, lastReadAt: now },
     });
+    const notifications = actor.type === 'USER'
+      ? await Promise.all((await tx.admin.findMany({ where: { status: 'ACTIVE' }, select: { id: true } })).map((admin) => createSupportNotification(tx, { adminId: admin.id }, conversation.id, message.id, input.message)))
+      : [await createSupportNotification(tx, { userId: input.userId }, conversation.id, message.id, input.message)];
     if (actor.type === 'ADMIN') {
       await tx.auditLog.create({
         data: supportAudit(actor, 'SUPPORT_CONVERSATION_CREATED', conversation.id, {
@@ -381,10 +393,13 @@ async function createConversation(
         }),
       });
     }
-    return { conversationId: conversation.id, message, created: true };
+    return { conversationId: conversation.id, message, created: true, notificationIds: notifications.map((notification) => notification.id) };
   }));
 
-  if (result.created) await safelyNotify(notifier.conversationCreated(result.conversationId), 'conversation.created');
+  if (result.created) {
+    await safelyNotify(notifier.conversationCreated(result.conversationId), 'conversation.created');
+    await safelyNotify(notifier.notificationCreated(result.notificationIds), 'notification.created');
+  }
   const conversation = await db.supportConversation.findUniqueOrThrow({
     where: { id: result.conversationId },
     include: conversationInclude,
@@ -416,7 +431,7 @@ async function sendMessage(
         ) {
           throw conflict('SUPPORT_MESSAGE_ID_REUSED', 'El identificador del mensaje ya fue utilizado');
         }
-        return { message: duplicate, created: false };
+        return { message: duplicate, created: false, notificationIds: [] as string[] };
       }
     }
     if (conversation.status === 'CLOSED') throw conflict('SUPPORT_CONVERSATION_CLOSED', 'La conversación está cerrada');
@@ -451,6 +466,10 @@ async function sendMessage(
       create: { conversationId, actorType: actor.type, actorId: actor.id, lastReadAt: now },
       update: { lastReadAt: now },
     });
+    const conversationOwner = await tx.supportConversation.findUniqueOrThrow({ where: { id: conversationId }, select: { userId: true } });
+    const notifications = actor.type === 'USER'
+      ? await Promise.all((await tx.admin.findMany({ where: { status: 'ACTIVE' }, select: { id: true } })).map((admin) => createSupportNotification(tx, { adminId: admin.id }, conversationId, message.id, input.content)))
+      : [await createSupportNotification(tx, { userId: conversationOwner.userId }, conversationId, message.id, input.content)];
     if (actor.type === 'ADMIN') {
       await tx.auditLog.create({
         data: supportAudit(actor, 'SUPPORT_MESSAGE_SENT', conversationId, {
@@ -460,10 +479,13 @@ async function sendMessage(
         }),
       });
     }
-    return { message, created: true };
+    return { message, created: true, notificationIds: notifications.map((notification) => notification.id) };
   }));
 
-  if (result.created) await safelyNotify(notifier.messageCreated(conversationId, result.message), 'message.created');
+  if (result.created) {
+    await safelyNotify(notifier.messageCreated(conversationId, result.message), 'message.created');
+    await safelyNotify(notifier.notificationCreated(result.notificationIds), 'notification.created');
+  }
   return { message: mapMessage(result.message, actor), reused: !result.created };
 }
 
@@ -503,9 +525,19 @@ async function markConversationRead(
       create: { conversationId, actorType: actor.type, actorId: actor.id, lastReadAt: nextReadAt },
       update: { lastReadAt: nextReadAt },
     });
+    await tx.notification.updateMany({
+      where: {
+        supportConversationId: conversationId,
+        ...(actor.type === 'USER' ? { userId: actor.id } : { adminId: actor.id }),
+        readAt: null,
+        createdAt: { lte: nextReadAt },
+      },
+      data: { readAt: nextReadAt },
+    });
     return nextReadAt;
   }));
   await safelyNotify(notifier.conversationRead(conversationId, actor, readAt), 'conversation.read');
+  await safelyNotify(notifier.notificationCountChanged(actor), 'notification.read');
   return { conversationId, readAt, unreadCount: await getSupportUnreadCount(db, actor) };
 }
 

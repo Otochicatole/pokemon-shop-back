@@ -14,6 +14,8 @@ import { BASE_CURRENCY } from '../../shared/currency.js';
 import { discardUnattachedFile, saveImage } from '../media/index.js';
 import { logger } from '../../infrastructure/logger.js';
 import { calculateLoyaltyQuote, releaseOrderLoyaltyReservation, reserveLoyaltyPoints, reverseOrderLoyalty, settleOrderLoyalty } from '../loyalty/index.js';
+import { createOrderCreatedNotifications, createOrderStatusNotification, createPaymentApprovedNotifications, createPaymentReviewNotifications, createReceiptSubmittedNotifications, publishNotifications } from '../notifications/index.js';
+import type { SupportRealtimeHub } from '../support/support-realtime.js';
 
 const itemSchema = z.object({ productId: z.string().uuid(), quantity: z.number().int().min(1).max(100), productVersion: z.number().int().min(1) });
 const fulfillmentSchema = z.discriminatedUnion('type', [
@@ -113,7 +115,7 @@ function mercadoPagoUsdUnsupported(error: unknown): boolean {
   return /(currency_id|currency|usd).*(unsupported|not supported|invalid|not available|not allowed)|(unsupported|not supported|invalid|not available|not allowed).*(currency_id|currency|usd)/i.test(message);
 }
 
-export async function reconcileMercadoPayment(externalId: string) {
+export async function reconcileMercadoPayment(externalId: string, realtime?: SupportRealtimeHub) {
   if (!env.MERCADOPAGO_ACCESS_TOKEN) return;
   try {
     const client = new MercadoPagoConfig({ accessToken: env.MERCADOPAGO_ACCESS_TOKEN });
@@ -126,18 +128,26 @@ export async function reconcileMercadoPayment(externalId: string) {
     const valid = response.currency_id === BASE_CURRENCY && receivedMinor === expectedMinor && (!env.MERCADOPAGO_COLLECTOR_ID || String(response.collector_id ?? '') === env.MERCADOPAGO_COLLECTOR_ID);
     const providerStatus = String(response.status ?? '');
     const mapped = providerStatus === 'approved' ? 'APPROVED' : providerStatus === 'pending' || providerStatus === 'in_process' || providerStatus === 'authorized' ? 'PENDING' : providerStatus === 'refunded' ? 'REFUNDED' : providerStatus === 'charged_back' || providerStatus === 'in_mediation' ? 'DISPUTED' : 'REJECTED';
-    await writeCoordinator.run(() => db.$transaction(async (tx) => {
+    const notificationIds = await writeCoordinator.run(() => db.$transaction(async (tx) => {
+      const createdIds: string[] = [];
       await tx.mercadoPagoPayment.update({ where: { paymentId: payment.id }, data: { externalPaymentId: externalId, status: providerStatus, statusDetail: response.status_detail ? String(response.status_detail) : null } });
       const current = await tx.order.findUniqueOrThrow({ where: { id: payment.orderId } });
       if (!valid) {
         await tx.payment.update({ where: { id: payment.id }, data: { status: 'REQUIRES_REVIEW', providerReference: externalId } });
-        if (!['PAID', 'COMPLETED', 'REFUND_RECORDED'].includes(current.status)) await tx.order.update({ where: { id: current.id }, data: { status: 'PAYMENT_REQUIRES_REVIEW', version: { increment: 1 } } });
-        return;
+        if (!['PAID', 'COMPLETED', 'REFUND_RECORDED', 'PAYMENT_REQUIRES_REVIEW'].includes(current.status)) {
+          await tx.order.update({ where: { id: current.id }, data: { status: 'PAYMENT_REQUIRES_REVIEW', version: { increment: 1 } } });
+          const history = await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'PAYMENT_REQUIRES_REVIEW', note: 'Mercado Pago validation failed' } });
+          createdIds.push((await createOrderStatusNotification(tx, current, history)).id);
+          createdIds.push(...(await createPaymentReviewNotifications(tx, current, history.id)).map((row) => row.id));
+        }
+        return createdIds;
       }
       await tx.payment.update({ where: { id: payment.id }, data: { status: mapped as any, providerReference: externalId } });
       if (mapped === 'APPROVED' && ['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(current.status) && current.expiresAt && current.expiresAt > new Date()) {
         await tx.order.update({ where: { id: current.id }, data: { status: 'PAID', version: { increment: 1 } } });
-        await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'PAID', note: 'Mercado Pago approved webhook' } });
+        const history = await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'PAID', note: 'Mercado Pago approved webhook' } });
+        createdIds.push((await createOrderStatusNotification(tx, current, history)).id);
+        createdIds.push(...(await createPaymentApprovedNotifications(tx, current, history.id)).map((row) => row.id));
         const reservations = await tx.inventoryReservation.findMany({ where: { orderId: current.id, consumedAt: null, releasedAt: null } });
         for (const reservation of reservations) {
           await tx.inventory.update({ where: { productId: reservation.productId }, data: { onHand: { decrement: reservation.quantity }, reserved: { decrement: reservation.quantity }, version: { increment: 1 } } });
@@ -146,6 +156,8 @@ export async function reconcileMercadoPayment(externalId: string) {
         await settleOrderLoyalty(tx, current.id);
       } else if (mapped === 'REJECTED' && ['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(current.status)) {
         await tx.order.update({ where: { id: current.id }, data: { status: 'CANCELLED', version: { increment: 1 } } });
+        const history = await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'CANCELLED', note: 'Mercado Pago rejected webhook' } });
+        createdIds.push((await createOrderStatusNotification(tx, current, history)).id);
         await releaseReservations(tx, current.id);
         await releaseOrderLoyaltyReservation(tx, current.id);
       } else if (mapped === 'REFUNDED') {
@@ -153,19 +165,25 @@ export async function reconcileMercadoPayment(externalId: string) {
         await releaseOrderLoyaltyReservation(tx, current.id);
         if (current.status !== 'REFUND_RECORDED') {
           await tx.order.update({ where: { id: current.id }, data: { status: 'REFUND_RECORDED', version: { increment: 1 } } });
-          await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'REFUND_RECORDED', note: 'Mercado Pago refunded webhook' } });
+          const history = await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'REFUND_RECORDED', note: 'Mercado Pago refunded webhook' } });
+          createdIds.push((await createOrderStatusNotification(tx, current, history)).id);
         }
         await reverseOrderLoyalty(tx, current.id);
       } else if (mapped === 'APPROVED' && current.status === 'EXPIRED') {
         await tx.order.update({ where: { id: current.id }, data: { status: 'PAYMENT_REQUIRES_REVIEW', version: { increment: 1 } } });
+        const history = await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'PAYMENT_REQUIRES_REVIEW', note: 'Mercado Pago approved after expiration' } });
+        createdIds.push((await createOrderStatusNotification(tx, current, history)).id);
+        createdIds.push(...(await createPaymentReviewNotifications(tx, current, history.id)).map((row) => row.id));
       }
+      return createdIds;
     }));
+    if (realtime && notificationIds.length) await publishNotifications(db, realtime, notificationIds);
   } catch (error) {
     logger.error({ err: error, externalId }, 'Mercado Pago reconciliation failed');
   }
 }
 
-export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
+export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?: SupportRealtimeHub): Router {
   const router = Router();
   router.get('/checkout/options', async (_req, res) => {
     const [zones, pickupPoints] = await Promise.all([
@@ -215,7 +233,7 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
       const previous = await tx.order.findUnique({ where: { userId_idempotencyKey: { userId: user.id, idempotencyKey: key } }, include: { items: true, payment: { include: { transfer: true, mercadoPago: true } } } });
       if (previous) {
         if (previous.idempotencyHash !== hash) throw conflict('IDEMPOTENCY_KEY_REUSED', 'Idempotency key was used with a different request');
-        return { order: previous, reused: true };
+        return { order: previous, reused: true, notificationIds: [] as string[] };
       }
       const quote = await calculateCheckout(tx, input, user.id);
       const expiresAt = new Date(Date.now() + (input.paymentMethod === 'BANK_TRANSFER' ? 24 * 60 * 60 * 1000 : 30 * 60 * 1000));
@@ -241,8 +259,11 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
         if (updated.count !== 1) throw conflict('OUT_OF_STOCK', 'Stock changed while creating the order');
         await tx.inventoryReservation.create({ data: { orderId: order.id, productId: product.id, quantity: item.quantity, expiresAt } });
       }
-      return { order, reused: false };
+      const adminNotifications = await createOrderCreatedNotifications(tx, order);
+      return { order, reused: false, notificationIds: adminNotifications.map((row) => row.id) };
     }));
+
+    if (!result.reused && realtime && result.notificationIds.length) await publishNotifications(prisma, realtime, result.notificationIds);
 
     let order: any = result.order;
     if (!result.reused && input.paymentMethod === 'MERCADO_PAGO') {
@@ -278,14 +299,16 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
     const user = currentUser(req)!.user;
     const order = await prisma.order.findFirst({ where: { number: String(req.params.number), userId: user.id } });
     if (!order) throw notFound('Order not found');
-    await writeCoordinator.run(() => prisma.$transaction(async (tx) => {
+    const notificationIds = await writeCoordinator.run(() => prisma.$transaction(async (tx) => {
       const current = await tx.order.findUnique({ where: { id: order.id } });
       if (!current || !['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(current.status)) throw conflict('ORDER_NOT_CANCELLABLE', 'Order cannot be cancelled');
       await tx.order.update({ where: { id: current.id }, data: { status: 'CANCELLED', version: { increment: 1 } } });
-      await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'CANCELLED', note: 'Cancelled by customer' } });
+      const history = await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'CANCELLED', note: 'Cancelled by customer' } });
       await releaseReservations(tx, current.id);
       await releaseOrderLoyaltyReservation(tx, current.id);
+      return [(await createOrderStatusNotification(tx, current, history)).id];
     }));
+    if (realtime && notificationIds.length) await publishNotifications(prisma, realtime, notificationIds);
     return res.status(204).send();
   });
 
@@ -296,18 +319,23 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
     if (!['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(order.status) || !req.file) throw badRequest('INVALID_RECEIPT', 'A valid receipt is required for this order');
     const file = await saveImage(prisma, req.file, 'PRIVATE', 'receipts');
     try {
-      await writeCoordinator.run(() => prisma.$transaction(async (tx) => {
+      const transactionResult = await writeCoordinator.run(() => prisma.$transaction(async (tx) => {
         const current = await tx.order.findUnique({ where: { id: order.id }, include: { payment: true } });
         if (!current?.payment || !['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(current.status)) {
           throw conflict('ORDER_NOT_RECEIPT_ELIGIBLE', 'Order no longer accepts transfer receipts');
         }
-        await tx.transferReceipt.create({ data: { orderId: current.id, fileId: file.id } });
+        const receipt = await tx.transferReceipt.create({ data: { orderId: current.id, fileId: file.id } });
         await tx.payment.update({ where: { id: current.payment.id }, data: { status: PaymentStatus.UNDER_REVIEW } });
+        const notificationIds = (await createReceiptSubmittedNotifications(tx, current, receipt.id)).map((row) => row.id);
+        const statusNotificationIds: string[] = [];
         if (current.status !== 'PAYMENT_REVIEW') {
           await tx.order.update({ where: { id: current.id }, data: { status: 'PAYMENT_REVIEW', version: { increment: 1 } } });
-          await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'PAYMENT_REVIEW', note: 'Transfer receipt submitted' } });
+          const history = await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: 'PAYMENT_REVIEW', note: 'Transfer receipt submitted' } });
+          statusNotificationIds.push((await createOrderStatusNotification(tx, current, history)).id);
         }
+        return [...notificationIds, ...statusNotificationIds];
       }));
+      if (realtime && transactionResult.length) await publishNotifications(prisma, realtime, transactionResult);
     } catch (error) {
       await discardUnattachedFile(prisma, file.id).catch(() => false);
       throw error;
@@ -324,7 +352,7 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any): Router {
     if (!paymentId) return res.status(400).json({ error: 'Missing payment id' });
     const existing = await prisma.webhookEvent.findUnique({ where: { provider_externalKey: { provider: 'mercadopago', externalKey: paymentId } } });
     if (!existing) await prisma.webhookEvent.create({ data: { provider: 'mercadopago', externalKey: paymentId, payload: JSON.stringify(req.body) } });
-    queueMicrotask(() => { void reconcileMercadoPayment(paymentId); });
+    queueMicrotask(() => { void reconcileMercadoPayment(paymentId, realtime); });
     // The event is persisted before acknowledging; reconciliation is intentionally idempotent.
     return res.status(200).json({ received: true });
   });

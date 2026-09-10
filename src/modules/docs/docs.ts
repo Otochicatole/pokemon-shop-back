@@ -295,6 +295,16 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
   const supportConversationResponse = envelope(z.object({ conversation: supportConversationSchema }));
   const supportCreateResponse = supportConversationResponse;
   const supportMessageCreatedResponse = envelope(z.object({ message: supportMessageResponseSchema }));
+  const notificationReferenceSchema = z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('ORDER'), orderNumber: z.string() }),
+    z.object({ kind: z.literal('SUPPORT_CONVERSATION'), conversationId: z.string().uuid() }),
+  ]);
+  const notificationSchema = z.object({ id: z.string().uuid(), type: z.enum(['SUPPORT_MESSAGE', 'ORDER_STATUS_CHANGED', 'ORDER_CREATED', 'TRANSFER_RECEIPT_SUBMITTED', 'PAYMENT_REQUIRES_REVIEW', 'PAYMENT_APPROVED']), title: z.string(), message: z.string(), readAt: dateTimeSchema.nullable(), createdAt: dateTimeSchema, reference: notificationReferenceSchema });
+  const notificationQuery = z.object({ cursor: z.string().uuid().optional(), limit: z.coerce.number().int().min(1).max(50).default(20), unreadOnly: z.preprocess((value) => value === 'true' ? true : value === 'false' ? false : value, z.boolean().default(false)) });
+  const notificationListResponse = z.object({ data: z.array(notificationSchema), meta: z.object({ nextCursor: z.string().uuid().nullable() }) });
+  const notificationUnreadResponse = envelope(z.object({ count: z.number().int().nonnegative() }));
+  const notificationReadResponse = envelope(z.object({ notification: notificationSchema, unreadCount: z.number().int().nonnegative() }));
+  const notificationReadAllResponse = envelope(z.object({ updatedCount: z.number().int().nonnegative(), unreadCount: z.number().int().nonnegative() }));
   const supportErrors = {
     400: publicErrors[400],
     401: publicErrors[401],
@@ -309,6 +319,11 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
   registry.registerPath({ method: 'post', path: '/api/v2/support/conversations/{id}/messages', tags: ['Support'], security: userSecurity, request: { params: supportConversationParams, headers: csrfHeader, body: { required: true, content: { 'application/json': { schema: createSupportMessageSchema } } } }, responses: { 200: { description: 'Idempotently reused support message', content: { 'application/json': { schema: supportMessageCreatedResponse } } }, 201: { description: 'Support message sent', content: { 'application/json': { schema: supportMessageCreatedResponse } } }, ...supportErrors } });
   registry.registerPath({ method: 'post', path: '/api/v2/support/conversations/{id}/read', tags: ['Support'], security: userSecurity, request: { params: supportConversationParams, headers: csrfHeader, body: { content: { 'application/json': { schema: markSupportReadSchema } } } }, responses: { 200: { description: 'Conversation read position updated', content: { 'application/json': { schema: supportReadResponse } } }, ...supportErrors } });
 
+  registry.registerPath({ method: 'get', path: '/api/v2/notifications', tags: ['Notifications'], security: userSecurity, request: { query: notificationQuery }, responses: { 200: { description: 'Customer notifications', content: { 'application/json': { schema: notificationListResponse } } }, 401: publicErrors[401] } });
+  registry.registerPath({ method: 'get', path: '/api/v2/notifications/unread-count', tags: ['Notifications'], security: userSecurity, responses: { 200: { description: 'Customer unread notification count', content: { 'application/json': { schema: notificationUnreadResponse } } }, 401: publicErrors[401] } });
+  registry.registerPath({ method: 'post', path: '/api/v2/notifications/{id}/read', tags: ['Notifications'], security: userSecurity, request: { params: z.object({ id: z.string().uuid() }), headers: csrfHeader }, responses: { 200: { description: 'Notification marked as read', content: { 'application/json': { schema: notificationReadResponse } } }, 401: publicErrors[401], 404: { description: 'Notification not found', content: { 'application/json': { schema: problemSchema } } } } });
+  registry.registerPath({ method: 'post', path: '/api/v2/notifications/read-all', tags: ['Notifications'], security: userSecurity, request: { headers: csrfHeader }, responses: { 200: { description: 'All customer notifications marked as read', content: { 'application/json': { schema: notificationReadAllResponse } } }, 401: publicErrors[401] } });
+
   registry.registerPath({ method: 'get', path: '/api/v2/admin/support/conversations', tags: ['Admin support'], security: adminSecurity, request: { query: supportConversationQuery }, responses: { 200: { description: 'All customer support conversations', content: { 'application/json': { schema: supportListResponse } } }, 401: publicErrors[401] } });
   registry.registerPath({ method: 'post', path: '/api/v2/admin/support/conversations', tags: ['Admin support'], security: adminSecurity, request: { headers: csrfHeader, body: { required: true, content: { 'application/json': { schema: createAdminSupportConversationSchema } } } }, responses: { 200: { description: 'Idempotently reused administrator-opened conversation', content: { 'application/json': { schema: supportCreateResponse } } }, 201: { description: 'Administrator-opened support conversation', content: { 'application/json': { schema: supportCreateResponse } } }, ...supportErrors } });
   registry.registerPath({ method: 'get', path: '/api/v2/admin/support/unread-count', tags: ['Admin support'], security: adminSecurity, responses: { 200: { description: 'Number of unread customer messages for this administrator', content: { 'application/json': { schema: supportUnreadResponse } } }, 401: publicErrors[401] } });
@@ -316,6 +331,10 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
   registry.registerPath({ method: 'post', path: '/api/v2/admin/support/conversations/{id}/messages', tags: ['Admin support'], security: adminSecurity, request: { params: supportConversationParams, headers: csrfHeader, body: { required: true, content: { 'application/json': { schema: createSupportMessageSchema } } } }, responses: { 200: { description: 'Idempotently reused support message', content: { 'application/json': { schema: supportMessageCreatedResponse } } }, 201: { description: 'Administrator support message sent', content: { 'application/json': { schema: supportMessageCreatedResponse } } }, ...supportErrors } });
   registry.registerPath({ method: 'post', path: '/api/v2/admin/support/conversations/{id}/read', tags: ['Admin support'], security: adminSecurity, request: { params: supportConversationParams, headers: csrfHeader, body: { content: { 'application/json': { schema: markSupportReadSchema } } } }, responses: { 200: { description: 'Administrator read position updated', content: { 'application/json': { schema: supportReadResponse } } }, ...supportErrors } });
   registry.registerPath({ method: 'patch', path: '/api/v2/admin/support/conversations/{id}/status', tags: ['Admin support'], security: adminSecurity, request: { params: supportConversationParams, headers: csrfHeader, body: { required: true, content: { 'application/json': { schema: updateSupportStatusSchema } } } }, responses: { 200: { description: 'Support workflow status changed', content: { 'application/json': { schema: supportConversationResponse } } }, ...supportErrors } });
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/notifications', tags: ['Admin notifications'], security: adminSecurity, request: { query: notificationQuery }, responses: { 200: { description: 'Administrator notifications', content: { 'application/json': { schema: notificationListResponse } } }, 401: publicErrors[401] } });
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/notifications/unread-count', tags: ['Admin notifications'], security: adminSecurity, responses: { 200: { description: 'Administrator unread notification count', content: { 'application/json': { schema: notificationUnreadResponse } } }, 401: publicErrors[401] } });
+  registry.registerPath({ method: 'post', path: '/api/v2/admin/notifications/{id}/read', tags: ['Admin notifications'], security: adminSecurity, request: { params: z.object({ id: z.string().uuid() }), headers: csrfHeader }, responses: { 200: { description: 'Notification marked as read', content: { 'application/json': { schema: notificationReadResponse } } }, 401: publicErrors[401], 404: { description: 'Notification not found', content: { 'application/json': { schema: problemSchema } } } } });
+  registry.registerPath({ method: 'post', path: '/api/v2/admin/notifications/read-all', tags: ['Admin notifications'], security: adminSecurity, request: { headers: csrfHeader }, responses: { 200: { description: 'All administrator notifications marked as read', content: { 'application/json': { schema: notificationReadAllResponse } } }, 401: publicErrors[401] } });
   registerAdminCmsPaths(registry, { problemSchema, moneySchema });
   const document = new OpenApiGeneratorV31(registry.definitions).generateDocument({
     openapi: '3.1.0',
@@ -344,16 +363,21 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
       { name: 'Loyalty', description: 'Configurable purchase points, redemption limits and account movements.' },
       { name: 'Support', description: 'Customer support inbox. Realtime events use /api/v2/support/ws?role=user with the customer cookie.' },
       { name: 'Admin support', description: 'Administrator support inbox. Realtime events use /api/v2/support/ws?role=admin with the admin cookie.' },
+      { name: 'Notifications', description: 'Persistent customer notifications for orders and support.' },
+      { name: 'Admin notifications', description: 'Persistent administrator notifications for actionable orders and support.' },
     ],
   });
   (document as typeof document & { 'x-websocket'?: unknown })['x-websocket'] = {
     url: '/api/v2/support/ws?role={user|admin}',
+    canonicalUrl: '/api/v2/notifications/ws?role={user|admin}',
     authentication: 'Opaque role-specific session cookie; Origin must be configured in FRONTEND_ORIGINS.',
     sessionLifecycle: 'Every socket is bound to the exact authenticated session and all tabs using that session are closed immediately when it is revoked or replaced at login.',
     closeCodes: { sessionRevoked: 4001, actorSocketLimitExceeded: 4008 },
     clientMessages: [{ type: 'ping' }],
     serverEvents: [
       'connection.ready',
+      'notification.created',
+      'notifications.unread_count',
       'support.conversation.created',
       'support.message.created',
       'support.conversation.read',

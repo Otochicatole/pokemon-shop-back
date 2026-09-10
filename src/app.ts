@@ -68,6 +68,8 @@ export function createApp(composition = createCompositionRoot()): Express {
     app.use(`${prefix}/loyalty`, composition.routers.loyalty);
     app.use(`${prefix}/support`, composition.routers.support);
     app.use(`${prefix}/admin/support`, composition.routers.adminSupport);
+    app.use(`${prefix}/notifications`, composition.routers.notifications);
+    app.use(`${prefix}/admin/notifications`, composition.routers.adminNotifications);
     app.use(prefix, composition.routers.commerce);
     app.use(`${prefix}/admin`, composition.routers.backoffice);
   };
