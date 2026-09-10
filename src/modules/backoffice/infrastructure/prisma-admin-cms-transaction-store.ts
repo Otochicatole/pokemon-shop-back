@@ -280,16 +280,18 @@ export class PrismaAdminCmsTransactionStore {
     }));
   }
 
-  addProductImages(actor: AdminActor, productId: string, expectedVersion: number, files: readonly { id: string; altText?: string }[]) {
+  addProductImages(actor: AdminActor, productId: string, expectedVersion: number, files: readonly { id: string; altText?: string }[], options?: { prepend?: boolean }) {
     return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
       const version = await incrementProductVersion(tx, productId, expectedVersion);
       const existing = await tx.productImage.findMany({ where: { productId, retiredAt: null }, orderBy: { sortOrder: 'asc' } });
       if (existing.length + files.length > 8) throw badRequest('TOO_MANY_IMAGES', 'A product can have at most eight active images');
+      const prepend = options?.prepend === true;
+      if (prepend && files.length) await tx.productImage.updateMany({ where: { productId, retiredAt: null }, data: { sortOrder: { increment: files.length } } });
       const created = [];
       for (const [offset, file] of files.entries()) {
-        created.push(await tx.productImage.create({ data: { productId, fileId: file.id, altText: file.altText, sortOrder: existing.length + offset, createdById: actor.adminId } }));
+        created.push(await tx.productImage.create({ data: { productId, fileId: file.id, altText: file.altText, sortOrder: prepend ? offset : existing.length + offset, createdById: actor.adminId } }));
       }
-      await tx.auditLog.create({ data: auditData(actor, 'PRODUCT_IMAGES_ADDED', 'Product', productId, { count: created.length, fromVersion: expectedVersion, toVersion: version }) });
+      await tx.auditLog.create({ data: auditData(actor, 'PRODUCT_IMAGES_ADDED', 'Product', productId, { count: created.length, prepend, fromVersion: expectedVersion, toVersion: version }) });
       return { version, images: created.map((image) => ({ id: image.id, fileId: image.fileId, url: `/media/public/${image.fileId}`, altText: image.altText, sortOrder: image.sortOrder })) };
     }));
   }

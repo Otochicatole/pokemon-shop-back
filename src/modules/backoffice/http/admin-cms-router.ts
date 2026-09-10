@@ -105,7 +105,7 @@ export function createAdminCmsRouter({ application, upload, requireAdmin, actorF
     const file = await downloadTcgdexImage(input.imageUrl);
     const stored = await media.saveProductImage(file);
     try {
-      return res.status(201).json(await application.products.addImages(actorFromRequest(req), productId, input.expectedVersion, [{ id: stored.id, altText: 'Imagen oficial de TCGdex' }]));
+      return res.status(201).json(await application.products.addImages(actorFromRequest(req), productId, input.expectedVersion, [{ id: stored.id, altText: 'Imagen oficial de TCGdex' }], { prepend: true }));
     } catch (error) {
       await media.discardUnattachedFile(stored.id).catch(() => false);
       throw error;

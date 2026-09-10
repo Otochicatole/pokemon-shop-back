@@ -11,8 +11,8 @@ export class ProductAdminUseCases {
   changeStatus(actor: AdminActor, id: string, expectedVersion: number, status: 'PUBLISHED' | 'ARCHIVED') {
     return this.products.setProductStatus(actor, id, expectedVersion, status);
   }
-  addImages(actor: AdminActor, id: string, expectedVersion: number, files: readonly { id: string; altText?: string }[]) {
-    return this.products.addProductImages(actor, id, expectedVersion, files);
+  addImages(actor: AdminActor, id: string, expectedVersion: number, files: readonly { id: string; altText?: string }[], options?: { prepend?: boolean }) {
+    return this.products.addProductImages(actor, id, expectedVersion, files, options);
   }
   updateImage(actor: AdminActor, id: string, imageId: string, expectedVersion: number, altText: string | null) {
     return this.products.updateProductImage(actor, id, imageId, expectedVersion, altText);

@@ -23,7 +23,7 @@ export interface ProductAdminRepository {
   createProduct(actor: AdminActor, input: ProductWrite): Promise<ProductDetailDto>;
   updateProduct(actor: AdminActor, id: string, input: ProductPatch): Promise<ProductDetailDto>;
   setProductStatus(actor: AdminActor, id: string, expectedVersion: number, status: 'PUBLISHED' | 'ARCHIVED'): Promise<ProductStatusDto>;
-  addProductImages(actor: AdminActor, productId: string, expectedVersion: number, files: readonly { id: string; altText?: string }[]): Promise<ProductImagesDto>;
+  addProductImages(actor: AdminActor, productId: string, expectedVersion: number, files: readonly { id: string; altText?: string }[], options?: { prepend?: boolean }): Promise<ProductImagesDto>;
   updateProductImage(actor: AdminActor, productId: string, imageId: string, expectedVersion: number, altText: string | null): Promise<ProductImageUpdateDto>;
   reorderProductImages(actor: AdminActor, productId: string, expectedVersion: number, imageIds: readonly string[]): Promise<ProductImageOrderDto>;
   retireProductImage(actor: AdminActor, productId: string, imageId: string, expectedVersion: number): Promise<void>;
