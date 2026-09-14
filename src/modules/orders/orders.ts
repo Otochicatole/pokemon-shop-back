@@ -26,11 +26,27 @@ const fulfillmentSchema = z.discriminatedUnion('type', [
 const checkoutSchema = z.object({
   items: z.array(itemSchema).min(1).max(50),
   fulfillment: fulfillmentSchema,
+  sellerFulfillments: z.array(z.object({ sellerKey: z.string().min(1).max(80), fulfillment: fulfillmentSchema })).max(20).optional(),
   paymentMethod: z.enum(['BANK_TRANSFER', 'MERCADO_PAGO']),
   pointsToRedeem: z.number().int().min(0).max(2_000_000_000).default(0),
 });
 
 type CheckoutInput = z.infer<typeof checkoutSchema>;
+
+type SellerGroup = {
+  key: string;
+  sellerType: 'STORE' | 'AFFILIATE';
+  affiliateId: string | null;
+  sellerName: string;
+  products: any[];
+  subtotal: bigint;
+  shipping: bigint;
+  commissionBps: number;
+  commission: bigint;
+  sellerNet: bigint;
+  fulfillment: any;
+  snapshot: Record<string, unknown>;
+};
 
 function canonical(input: CheckoutInput) {
   return JSON.stringify({ ...input, items: [...input.items].sort((a, b) => a.productId.localeCompare(b.productId)) });
@@ -58,6 +74,7 @@ function mapOrder(order: any, transferSettings: TransferSettingsRecord) {
     expiresAt: order.expiresAt,
     items: order.items?.map((item: any) => ({ productId: item.productId, sku: item.sku, name: item.productName, imageFileId: item.imageFileId ?? null, imageUrl: item.imageFileId ? `/media/public/${item.imageFileId}` : null, quantity: item.quantity, unitPrice: moneyDto({ amountMinor: item.unitPriceMinor, currency: BASE_CURRENCY }), lineTotal: moneyDto({ amountMinor: item.lineTotalMinor, currency: BASE_CURRENCY }) })),
     timeline: Array.isArray(order.statusHistory) ? order.statusHistory.map((event: any) => ({ id: event.id, fromStatus: event.fromStatus ?? null, toStatus: event.toStatus, createdAt: event.createdAt })) : [],
+    sellerOrders: order.sellerOrders?.map((sellerOrder: any) => ({ id: sellerOrder.id, number: sellerOrder.number, sellerType: sellerOrder.sellerType, affiliateId: sellerOrder.affiliateId, sellerName: sellerOrder.sellerName, ...(order.payment?.status === 'APPROVED' || order.payment?.status === 'PARTIALLY_REFUNDED' || order.payment?.status === 'REFUNDED' ? { sellerContactPhone: sellerOrder.sellerContactPhone } : {}), status: sellerOrder.status, version: sellerOrder.version, subtotal: moneyDto({ amountMinor: sellerOrder.subtotalMinor, currency: BASE_CURRENCY }), shipping: moneyDto({ amountMinor: sellerOrder.shippingMinor, currency: BASE_CURRENCY }), commission: moneyDto({ amountMinor: sellerOrder.commissionMinor, currency: BASE_CURRENCY }), sellerNet: moneyDto({ amountMinor: sellerOrder.sellerNetMinor, currency: BASE_CURRENCY }), fulfillmentType: sellerOrder.fulfillmentType, fulfillment: sellerOrder.fulfillmentType === 'SHIPMENT' ? { type: 'SHIPMENT', recipientName: sellerOrder.recipientName, recipientPhone: sellerOrder.recipientPhone, addressLine1: sellerOrder.addressLine1, addressLine2: sellerOrder.addressLine2, city: sellerOrder.city, province: sellerOrder.province, postalCode: sellerOrder.postalCode, shippingRateName: sellerOrder.shippingRateName, shippingZoneName: sellerOrder.shippingZoneName } : { type: 'PICKUP', pickupPointName: sellerOrder.pickupPointName, pickupPointAddress: sellerOrder.pickupPointAddress }, items: sellerOrder.items?.map((item: any) => ({ productId: item.productId, name: item.productName, quantity: item.quantity, unitPrice: moneyDto({ amountMinor: item.unitPriceMinor, currency: BASE_CURRENCY }), lineTotal: moneyDto({ amountMinor: item.lineTotalMinor, currency: BASE_CURRENCY }) })), timeline: sellerOrder.statusHistory ?? [], issues: sellerOrder.issues ?? [] })) ?? [],
     fulfillment: order.fulfillmentType === 'SHIPMENT' ? { type: 'SHIPMENT', recipientName: order.recipientName, recipientPhone: order.recipientPhone, addressLine1: order.addressLine1, addressLine2: order.addressLine2, city: order.city, province: order.province, postalCode: order.postalCode, shippingRateId: order.shippingRateId, shippingZoneName: order.shippingZoneName ?? null, shippingRateName: order.shippingRateName ?? null, shippingRatePrice: order.shippingRatePriceMinor === null || order.shippingRatePriceMinor === undefined ? null : moneyDto({ amountMinor: order.shippingRatePriceMinor, currency: BASE_CURRENCY }) } : { type: 'PICKUP', pickupPointId: order.pickupPointId, pickupPointName: order.pickupPointName ?? null, pickupPointAddress: order.pickupPointAddress ?? null },
     payment: order.payment ? { method: order.payment.method, status: order.payment.status, bankReference: order.payment.transfer?.reference ?? null, bankInstructions: order.payment.method === 'BANK_TRANSFER' && bankConfigured ? mapTransferInstructions(transferSettings) : null, receipt: order.transferReceipts?.[0] ? { fileId: order.transferReceipts[0].fileId, review: order.transferReceipts[0].review, createdAt: order.transferReceipts[0].createdAt } : null, checkoutUrl: order.payment.mercadoPago?.checkoutUrl ?? null, paymentSessionStatus: order.payment.mercadoPago && !order.payment.mercadoPago.checkoutUrl ? 'RETRY_REQUIRED' : 'READY' } : null,
     createdAt: order.createdAt,
@@ -68,31 +85,48 @@ async function calculateCheckout(tx: any, input: CheckoutInput, userId: string) 
   const products = [] as any[];
   let subtotal = 0n;
   for (const item of input.items) {
-    const product = await tx.product.findUnique({ where: { id: item.productId }, include: { pokemonCard: true, inventory: true, images: { where: { retiredAt: null }, orderBy: { sortOrder: 'asc' } } } });
+    const product = await tx.product.findUnique({ where: { id: item.productId }, include: { pokemonCard: true, inventory: true, images: { where: { retiredAt: null }, orderBy: { sortOrder: 'asc' } }, affiliate: { include: { user: true } }, affiliateListing: true } });
     if (!product || product.status !== ProductStatus.PUBLISHED) throw conflict('PRODUCT_UNAVAILABLE', 'A product is no longer available');
+    if (product.affiliate && (product.affiliate.status !== 'ACTIVE' || product.affiliateListing?.status !== 'APPROVED')) throw conflict('PRODUCT_UNAVAILABLE', 'A seller listing is no longer available');
+    if (product.affiliate?.userId === userId) throw forbidden('You cannot purchase your own products');
     if (product.version !== item.productVersion) throw conflict('PRODUCT_CHANGED', 'A product changed since it was loaded', { productId: item.productId, currentVersion: product.version });
     const available = (product.inventory?.onHand ?? 0) - (product.inventory?.reserved ?? 0);
     if (available < item.quantity) throw conflict('OUT_OF_STOCK', 'Insufficient stock', { productId: item.productId });
     const line = product.priceMinor * BigInt(item.quantity);
     subtotal += line;
-    products.push({ item, product, line });
+    products.push({ item, product, line, sellerKey: product.affiliateId ?? 'STORE' });
   }
 
-  let shipping = 0n;
-  let fulfillmentSnapshot: { shippingZoneName?: string; shippingRateName?: string; shippingRatePriceMinor?: bigint; pickupPointName?: string; pickupPointAddress?: string } = {};
-  if (input.fulfillment.type === 'SHIPMENT') {
-    const shipment = input.fulfillment;
-    const rate = await tx.shippingRate.findUnique({ where: { id: shipment.shippingRateId }, include: { zone: { include: { provinces: true } } } });
-    if (!rate || !rate.active || !rate.zone.active || !rate.zone.provinces.some((province: any) => province.province.toLowerCase() === shipment.province.toLowerCase())) throw badRequest('INVALID_SHIPPING_RATE', 'Shipping rate is not valid for this province');
-    shipping = rate.priceMinor;
-    fulfillmentSnapshot = { shippingZoneName: rate.zone.name, shippingRateName: rate.name, shippingRatePriceMinor: rate.priceMinor };
-  } else {
-    const pickup = await tx.pickupPoint.findUnique({ where: { id: input.fulfillment.pickupPointId } });
-    if (!pickup?.active) throw badRequest('INVALID_PICKUP_POINT', 'Pickup point is not available');
-    fulfillmentSnapshot = { pickupPointName: pickup.name, pickupPointAddress: pickup.address };
+  const commissionSettings = await tx.affiliateProgramSettings.upsert({ where: { id: 'default' }, create: {}, update: {} });
+  const bySeller = new Map<string, SellerGroup>();
+  for (const entry of products) {
+    const affiliate = entry.product.affiliate;
+    const group: SellerGroup = bySeller.get(entry.sellerKey) ?? { key: entry.sellerKey, sellerType: affiliate ? 'AFFILIATE' : 'STORE', affiliateId: affiliate?.id ?? null, sellerName: affiliate?.publicName ?? 'Card Shop', products: [], subtotal: 0n, shipping: 0n, commissionBps: affiliate ? commissionSettings.commissionBps : 0, commission: 0n, sellerNet: 0n, fulfillment: input.fulfillment, snapshot: {} };
+    group.products.push(entry); group.subtotal += entry.line; bySeller.set(entry.sellerKey, group);
   }
-  const loyalty = await calculateLoyaltyQuote(tx, userId, subtotal, input.pointsToRedeem);
-  return { products, subtotal, shipping, discount: loyalty.discountMinor, total: subtotal + shipping - loyalty.discountMinor, fulfillmentSnapshot, loyalty };
+  const requested = new Map((input.sellerFulfillments ?? []).map((entry) => [entry.sellerKey, entry.fulfillment]));
+  for (const group of bySeller.values()) {
+    const fulfillment = requested.get(group.key) ?? (bySeller.size === 1 ? input.fulfillment : null);
+    if (!fulfillment) throw badRequest('SELLER_FULFILLMENT_REQUIRED', 'Select a delivery option for each seller');
+    group.fulfillment = fulfillment;
+    if (fulfillment.type === 'SHIPMENT') {
+      const rate = await tx.shippingRate.findUnique({ where: { id: fulfillment.shippingRateId }, include: { zone: { include: { provinces: true } } } });
+      if (!rate || !rate.active || !rate.zone.active || rate.zone.affiliateId !== group.affiliateId || !rate.zone.provinces.some((province: any) => province.province.toLowerCase() === fulfillment.province.toLowerCase())) throw badRequest('INVALID_SHIPPING_RATE', 'Shipping rate is not valid for this seller and province');
+      group.shipping = rate.priceMinor; group.snapshot = { shippingZoneName: rate.zone.name, shippingRateName: rate.name, shippingRatePriceMinor: rate.priceMinor, shippingRateId: rate.id };
+    } else {
+      const pickup = await tx.pickupPoint.findUnique({ where: { id: fulfillment.pickupPointId } });
+      if (!pickup?.active || pickup.affiliateId !== group.affiliateId) throw badRequest('INVALID_PICKUP_POINT', 'Pickup point is not available for this seller');
+      group.snapshot = { pickupPointName: pickup.name, pickupPointAddress: pickup.address, pickupPointId: pickup.id };
+    }
+    group.commission = group.affiliateId ? (group.subtotal * BigInt(group.commissionBps) + 9999n) / 10000n : 0n;
+    group.sellerNet = group.subtotal + group.shipping - group.commission;
+  }
+  const groups = [...bySeller.values()];
+  const storeSubtotal = groups.filter((group) => !group.affiliateId).reduce((sum, group) => sum + group.subtotal, 0n);
+  const shipping = groups.reduce((sum, group) => sum + group.shipping, 0n);
+  const loyalty = await calculateLoyaltyQuote(tx, userId, storeSubtotal, input.pointsToRedeem);
+  const fulfillmentSnapshot = groups.length === 1 ? groups[0]?.snapshot ?? {} : {};
+  return { products, groups, subtotal, shipping, discount: loyalty.discountMinor, total: subtotal + shipping - loyalty.discountMinor, fulfillmentSnapshot, loyalty };
 }
 
 async function createMercadoPreference(order: any) {
@@ -154,6 +188,7 @@ export async function reconcileMercadoPayment(externalId: string, realtime?: Sup
           await tx.inventory.update({ where: { productId: reservation.productId }, data: { onHand: { decrement: reservation.quantity }, reserved: { decrement: reservation.quantity }, version: { increment: 1 } } });
           await tx.inventoryReservation.update({ where: { id: reservation.id }, data: { consumedAt: new Date() } });
         }
+        await settleSellerOrdersOnPayment(tx, current.id);
         await settleOrderLoyalty(tx, current.id);
       } else if (mapped === 'REJECTED' && ['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(current.status)) {
         await tx.order.update({ where: { id: current.id }, data: { status: 'CANCELLED', version: { increment: 1 } } });
@@ -193,6 +228,22 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?:
     ]);
     const transferSettings = await getTransferSettings(prisma);
     return res.json({ fulfillment: { shippingZones: zones.map((zone) => ({ id: zone.id, name: zone.name, provinces: zone.provinces.map((province) => province.province), rates: zone.rates.map((rate) => ({ id: rate.id, name: rate.name, price: moneyDto({ amountMinor: rate.priceMinor, currency: BASE_CURRENCY }) })) })), pickupPoints: pickupPoints.map((point) => ({ id: point.id, name: point.name, address: point.address })) }, paymentMethods: { BANK_TRANSFER: transferSettingsConfigured(transferSettings), MERCADO_PAGO: Boolean(env.MERCADOPAGO_ACCESS_TOKEN) } });
+  });
+  router.post('/checkout/options', requireUser, async (req, res) => {
+    const user = currentUser(req)!.user;
+    const input = z.object({ items: z.array(itemSchema).min(1).max(50) }).parse(req.body);
+    const products = await prisma.product.findMany({ where: { id: { in: input.items.map((item) => item.productId) }, status: ProductStatus.PUBLISHED }, include: { affiliate: true, affiliateListing: true } });
+    if (products.length !== input.items.length || products.some((product) => product.affiliate && (product.affiliate.status !== 'ACTIVE' || product.affiliateListing?.status !== 'APPROVED'))) throw conflict('PRODUCT_UNAVAILABLE', 'A product is no longer available');
+    if (products.some((product) => product.affiliate?.userId === user.id)) throw forbidden('You cannot purchase your own products');
+    const sellerIds = [...new Set(products.map((product) => product.affiliateId))];
+    const [zones, pickupPoints, transferSettings] = await Promise.all([
+      prisma.shippingZone.findMany({ where: { active: true, OR: sellerIds.map((affiliateId) => ({ affiliateId })) }, include: { provinces: true, rates: { where: { active: true }, orderBy: { priceMinor: 'asc' } } }, orderBy: { name: 'asc' } }),
+      prisma.pickupPoint.findMany({ where: { active: true, OR: sellerIds.map((affiliateId) => ({ affiliateId })) }, orderBy: { name: 'asc' } }),
+      getTransferSettings(prisma),
+    ]);
+    const sellerOptions = products.map((product) => { const key = product.affiliateId ?? 'STORE'; const affiliate = product.affiliate; return { sellerKey: key, seller: { type: affiliate ? 'AFFILIATE' : 'STORE', id: affiliate?.id ?? null, name: affiliate?.publicName ?? 'Card Shop' }, shippingZones: zones.filter((zone) => zone.affiliateId === product.affiliateId).map((zone) => ({ id: zone.id, name: zone.name, provinces: zone.provinces.map((province) => province.province), rates: zone.rates.map((rate) => ({ id: rate.id, name: rate.name, price: moneyDto({ amountMinor: rate.priceMinor, currency: BASE_CURRENCY }) })) })), pickupPoints: pickupPoints.filter((point) => point.affiliateId === product.affiliateId).map((point) => ({ id: point.id, name: point.name, address: point.address })) }; });
+    const unique = [...new Map(sellerOptions.map((option) => [option.sellerKey, option])).values()];
+    return res.json({ fulfillment: { shippingZones: unique[0]?.shippingZones ?? [], pickupPoints: unique[0]?.pickupPoints ?? [] }, sellers: unique, paymentMethods: { BANK_TRANSFER: transferSettingsConfigured(transferSettings), MERCADO_PAGO: Boolean(env.MERCADOPAGO_ACCESS_TOKEN) } });
   });
   router.post('/checkout/preview', requireUser, async (req, res) => {
     const user = currentUser(req)!.user;
@@ -264,6 +315,20 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?:
         if (updated.count !== 1) throw conflict('OUT_OF_STOCK', 'Stock changed while creating the order');
         await tx.inventoryReservation.create({ data: { orderId: order.id, productId: product.id, quantity: item.quantity, expiresAt } });
       }
+      for (const [index, group] of quote.groups.entries()) {
+        const sellerOrder = await tx.sellerOrder.create({ data: {
+          orderId: order.id, number: `${order.number}-${String(index + 1).padStart(2, '0')}`, sellerType: group.sellerType, affiliateId: group.affiliateId, sellerName: group.sellerName, sellerContactPhone: group.products[0]?.product.affiliate?.contactPhone ?? null, status: 'PENDING_PAYMENT',
+          subtotalMinor: group.subtotal, shippingMinor: group.shipping, commissionBps: group.commissionBps, commissionMinor: group.commission, sellerNetMinor: group.sellerNet,
+          fulfillmentType: group.fulfillment.type, shippingRateId: group.snapshot.shippingRateId as string | undefined, shippingZoneName: group.snapshot.shippingZoneName as string | undefined, shippingRateName: group.snapshot.shippingRateName as string | undefined, shippingRatePriceMinor: group.snapshot.shippingRatePriceMinor as bigint | undefined,
+          pickupPointId: group.snapshot.pickupPointId as string | undefined, pickupPointName: group.snapshot.pickupPointName as string | undefined, pickupPointAddress: group.snapshot.pickupPointAddress as string | undefined,
+          ...(group.fulfillment.type === 'SHIPMENT' ? { recipientName: group.fulfillment.recipientName, recipientPhone: group.fulfillment.recipientPhone, addressLine1: group.fulfillment.addressLine1, addressLine2: group.fulfillment.addressLine2, city: group.fulfillment.city, province: group.fulfillment.province, postalCode: group.fulfillment.postalCode } : {}),
+          statusHistory: { create: { toStatus: 'PENDING_PAYMENT', note: 'Seller order created' } },
+        } });
+        for (const entry of group.products) {
+          await tx.orderItem.updateMany({ where: { orderId: order.id, productId: entry.product.id }, data: { sellerOrderId: sellerOrder.id } });
+          await tx.inventoryReservation.updateMany({ where: { orderId: order.id, productId: entry.product.id }, data: { sellerOrderId: sellerOrder.id } });
+        }
+      }
       const adminNotifications = await createOrderCreatedNotifications(tx, order);
       return { order, reused: false, notificationIds: adminNotifications.map((row) => row.id), transferSettings: currentTransferSettings };
     }));
@@ -281,6 +346,7 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?:
         if (mercadoPagoUsdUnsupported(error)) throw new AppError(503, 'MERCADOPAGO_USD_UNSUPPORTED', 'Mercado Pago no admite pagos en USD para esta cuenta');
       }
     }
+    order = await prisma.order.findUniqueOrThrow({ where: { id: order.id }, include: { items: true, sellerOrders: { include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } }, issues: true } }, statusHistory: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }, transferReceipts: { orderBy: { createdAt: 'desc' }, take: 1 }, payment: { include: { transfer: true, mercadoPago: true, refunds: true } } } });
     return res.status(result.reused ? 200 : 201).json({ order: mapOrder(order, result.transferSettings), reused: result.reused });
   });
 
@@ -288,7 +354,7 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?:
     const user = currentUser(req)!.user;
     const transferSettings = await getTransferSettings(prisma);
     const limit = Math.min(50, Math.max(1, Number(req.query.limit ?? 20)));
-    const orders = await prisma.order.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'desc' }, take: limit + 1, ...(req.query.cursor ? { skip: 1, cursor: { id: String(req.query.cursor) } } : {}), include: { items: true, transferReceipts: { orderBy: { createdAt: 'desc' }, take: 1 }, payment: { include: { transfer: true, mercadoPago: true } } } });
+    const orders = await prisma.order.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'desc' }, take: limit + 1, ...(req.query.cursor ? { skip: 1, cursor: { id: String(req.query.cursor) } } : {}), include: { items: true, sellerOrders: { include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } }, issues: true } }, transferReceipts: { orderBy: { createdAt: 'desc' }, take: 1 }, payment: { include: { transfer: true, mercadoPago: true } } } });
     const hasMore = orders.length > limit;
     const page = hasMore ? orders.slice(0, limit) : orders;
     return res.json({ data: page.map((order) => mapOrder(order, transferSettings)), nextCursor: hasMore ? page.at(-1)?.id ?? null : null });
@@ -297,9 +363,45 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?:
   router.get('/orders/:number', requireUser, async (req, res) => {
     const user = currentUser(req)!.user;
     const transferSettings = await getTransferSettings(prisma);
-    const order = await prisma.order.findFirst({ where: { number: String(req.params.number), userId: user.id }, include: { items: true, statusHistory: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }, transferReceipts: { orderBy: { createdAt: 'desc' }, take: 1 }, payment: { include: { transfer: true, mercadoPago: true } } } });
+    const order = await prisma.order.findFirst({ where: { number: String(req.params.number), userId: user.id }, include: { items: true, sellerOrders: { include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } }, issues: true } }, statusHistory: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }, transferReceipts: { orderBy: { createdAt: 'desc' }, take: 1 }, payment: { include: { transfer: true, mercadoPago: true } } } });
     if (!order) throw notFound('Order not found');
     return res.json({ order: mapOrder(order, transferSettings) });
+  });
+
+  router.post('/orders/:number/seller-orders/:sellerOrderId/confirm', requireUser, async (req, res) => {
+    const user = currentUser(req)!.user;
+    const sellerOrder = await prisma.sellerOrder.findFirst({ where: { id: String(req.params.sellerOrderId), order: { number: String(req.params.number), userId: user.id } } });
+    if (!sellerOrder) throw notFound('Seller order not found');
+    if (!['SHIPPED', 'READY_FOR_PICKUP', 'PICKED_UP'].includes(sellerOrder.status)) throw conflict('SELLER_ORDER_NOT_CONFIRMABLE', 'This seller order is not ready to be completed');
+    const input = z.object({ expectedVersion: z.number().int().min(1) }).parse(req.body);
+    await prisma.$transaction(async (tx) => {
+      const changed = await tx.sellerOrder.updateMany({ where: { id: sellerOrder.id, version: input.expectedVersion }, data: { status: 'COMPLETED', completedAt: new Date(), autoCompleteAt: null, version: { increment: 1 } } });
+      if (changed.count !== 1) throw conflict('SELLER_ORDER_CHANGED', 'Seller order was modified by another request');
+      await tx.sellerOrderHistory.create({ data: { sellerOrderId: sellerOrder.id, fromStatus: sellerOrder.status, toStatus: 'COMPLETED', note: 'Receipt confirmed by buyer', changedByType: 'USER', changedById: user.id } });
+      if (sellerOrder.affiliateId) {
+        const pending = await tx.affiliateLedgerEntry.findFirst({ where: { sellerOrderId: sellerOrder.id, type: 'SALE_PENDING', bucket: 'PENDING' } });
+        if (pending) {
+          await tx.affiliateLedgerEntry.create({ data: { affiliateId: sellerOrder.affiliateId, sellerOrderId: sellerOrder.id, bucket: 'PENDING', type: 'SALE_RELEASED', amountMinor: -sellerOrder.sellerNetMinor, note: 'Pending earnings released' } });
+          await tx.affiliateLedgerEntry.create({ data: { affiliateId: sellerOrder.affiliateId, sellerOrderId: sellerOrder.id, bucket: 'AVAILABLE', type: 'SALE_RELEASED', amountMinor: sellerOrder.sellerNetMinor, note: 'Order completed' } });
+        }
+      }
+    });
+    return res.json({ id: sellerOrder.id, status: 'COMPLETED', version: input.expectedVersion + 1 });
+  });
+
+  router.post('/orders/:number/seller-orders/:sellerOrderId/issues', requireUser, async (req, res) => {
+    const user = currentUser(req)!.user;
+    const input = z.object({ reason: z.string().trim().min(3).max(1000) }).parse(req.body);
+    const sellerOrder = await prisma.sellerOrder.findFirst({ where: { id: String(req.params.sellerOrderId), order: { number: String(req.params.number), userId: user.id } } });
+    if (!sellerOrder || !sellerOrder.affiliateId) throw notFound('Seller order not found');
+    if (['COMPLETED', 'CANCELLED', 'REFUNDED'].includes(sellerOrder.status)) throw conflict('SELLER_ORDER_CLOSED', 'Closed seller orders cannot receive incidents');
+    const issue = await prisma.$transaction(async (tx) => {
+      const created = await tx.affiliateIssue.create({ data: { sellerOrderId: sellerOrder.id, affiliateId: sellerOrder.affiliateId!, openedByUserId: user.id, reason: input.reason } });
+      await tx.sellerOrder.update({ where: { id: sellerOrder.id }, data: { status: 'DISPUTED', version: { increment: 1 }, autoCompleteAt: null } });
+      await tx.sellerOrderHistory.create({ data: { sellerOrderId: sellerOrder.id, fromStatus: sellerOrder.status, toStatus: 'DISPUTED', note: 'Buyer reported an issue', changedByType: 'USER', changedById: user.id } });
+      return created;
+    });
+    return res.status(201).json({ id: issue.id, status: issue.status });
   });
 
   router.post('/orders/:number/cancel', requireUser, async (req, res) => {
@@ -376,3 +478,16 @@ async function releaseReservations(tx: any, orderId: string) {
 }
 
 export { mapOrder, releaseReservations };
+
+/** Moves each affiliate seller order from payment-pending to paid exactly once and records pending earnings. */
+export async function settleSellerOrdersOnPayment(tx: any, orderId: string) {
+  const sellerOrders = await tx.sellerOrder.findMany({ where: { orderId, status: 'PENDING_PAYMENT' } });
+  for (const sellerOrder of sellerOrders) {
+    await tx.sellerOrder.update({ where: { id: sellerOrder.id }, data: { status: 'PAID', version: { increment: 1 } } });
+    await tx.sellerOrderHistory.create({ data: { sellerOrderId: sellerOrder.id, fromStatus: 'PENDING_PAYMENT', toStatus: 'PAID', note: 'Payment accredited', changedByType: 'SYSTEM' } });
+    if (sellerOrder.affiliateId) {
+      const existing = await tx.affiliateLedgerEntry.findFirst({ where: { sellerOrderId: sellerOrder.id, type: 'SALE_PENDING' } });
+      if (!existing) await tx.affiliateLedgerEntry.create({ data: { affiliateId: sellerOrder.affiliateId, sellerOrderId: sellerOrder.id, bucket: 'PENDING', type: 'SALE_PENDING', amountMinor: sellerOrder.sellerNetMinor, note: 'Payment accredited; available after completion' } });
+    }
+  }
+}

@@ -5,7 +5,7 @@ export const pokemonTypes = ['COLORLESS', 'DARKNESS', 'DRAGON', 'FAIRY', 'FIGHTI
 export const productConditions = ['NM', 'EXCELLENT', 'GOOD', 'PLAYED', 'DAMAGED'] as const;
 export const orderStatuses = ['PENDING_PAYMENT', 'PAYMENT_REVIEW', 'PAID', 'PREPARING', 'READY_FOR_PICKUP', 'SHIPPED', 'COMPLETED', 'CANCELLED', 'EXPIRED', 'REFUND_RECORDED', 'PAYMENT_REQUIRES_REVIEW'] as const;
 export const paymentMethods = ['BANK_TRANSFER', 'MERCADO_PAGO'] as const;
-export const paymentStatuses = ['PENDING', 'UNDER_REVIEW', 'APPROVED', 'REJECTED', 'FAILED', 'REFUNDED', 'DISPUTED', 'REQUIRES_REVIEW'] as const;
+export const paymentStatuses = ['PENDING', 'UNDER_REVIEW', 'APPROVED', 'PARTIALLY_REFUNDED', 'REJECTED', 'FAILED', 'REFUNDED', 'DISPUTED', 'REQUIRES_REVIEW'] as const;
 
 export type ProductStatusValue = typeof productStatuses[number];
 export type ProductKindValue = typeof productKinds[number];

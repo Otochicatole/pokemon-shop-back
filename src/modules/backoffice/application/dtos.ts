@@ -117,8 +117,8 @@ export type InventoryAdjustmentDto = {
   delta: number;
   reason: string;
   createdAt: Date;
-  createdById: string;
-  createdBy: { id: string; email: string; name: string | null };
+  createdById: string | null;
+  createdBy: { id: string; email: string; name: string | null } | null;
 };
 export type InventoryMutationDto = { productId: string; onHand: number; reserved: number; available: number; version: number };
 

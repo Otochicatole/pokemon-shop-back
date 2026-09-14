@@ -77,6 +77,8 @@ export function createApp(composition = createCompositionRoot()): Express {
   app.use('/api/v2', responseEnvelopeV2());
   app.use('/api/v2/catalog', composition.routers.catalog);
   app.use('/api/v2/news', composition.routers.news);
+  app.use('/api/v2/affiliate', composition.routers.affiliate);
+  app.use('/api/v2/admin/affiliates', composition.routers.adminAffiliate);
   mount('/api/v2');
   app.use('/media', composition.routers.media);
   app.use(composition.routers.docs);

@@ -39,6 +39,7 @@ export function statusLabel(status: string): string {
     PAID: 'pagada',
     PREPARING: 'en preparación',
     READY_FOR_PICKUP: 'lista para retirar',
+    PICKED_UP: 'retirada',
     SHIPPED: 'enviada',
     COMPLETED: 'completada',
     CANCELLED: 'cancelada',

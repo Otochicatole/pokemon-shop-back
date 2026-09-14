@@ -20,6 +20,7 @@ import { createNotificationsRouters } from '../modules/notifications/index.js';
 import { PrismaUnitOfWork } from '../shared/infrastructure/prisma-unit-of-work.js';
 import { getTransferSettings, transferSettingsConfigured } from '../modules/payments/index.js';
 import { createNewsRouter } from '../modules/news/index.js';
+import { createAffiliateRouter, createAdminAffiliateRouter } from '../modules/affiliates/index.js';
 
 export interface CompositionRoot {
   prisma: typeof prisma;
@@ -33,6 +34,8 @@ export interface CompositionRoot {
     adminAccess: ReturnType<typeof createAdminAuthRouter>;
     catalog: ReturnType<typeof createCatalogV2Router>;
     news: ReturnType<typeof createNewsRouter>;
+    affiliate: ReturnType<typeof createAffiliateRouter>;
+    adminAffiliate: ReturnType<typeof createAdminAffiliateRouter>;
     commerce: ReturnType<typeof createOrdersRouter>;
     loyalty: ReturnType<typeof createLoyaltyRouter>;
     support: ReturnType<typeof createSupportRouters>['userRouter'];
@@ -93,6 +96,8 @@ export function createCompositionRoot(): CompositionRoot {
       adminAccess: createAdminAuthRouter(prisma, { onSessionRevoked }),
       catalog: createCatalogV2Router(new PrismaCatalogRepository(prisma)),
       news: createNewsRouter(prisma),
+      affiliate: createAffiliateRouter(prisma, upload, (file) => saveImage(prisma, file, 'PUBLIC', 'products'), (id) => discardUnattachedFile(prisma, id)),
+      adminAffiliate: createAdminAffiliateRouter(prisma),
       commerce: createOrdersRouter(prisma, upload, supportRealtime),
       loyalty: createLoyaltyRouter(prisma),
       support: supportRouters.userRouter,

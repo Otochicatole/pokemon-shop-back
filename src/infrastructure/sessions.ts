@@ -206,6 +206,17 @@ export async function requireUser(request: Request, _response: Response, next: N
   return next();
 }
 
+export async function requireAffiliate(request: Request, _response: Response, next: NextFunction) {
+  const session = currentUser(request) ?? await getUserSession(request);
+  if (!session) return next(unauthorized());
+  resLocals(request).userSession = session;
+  if (!session.user.emailVerifiedAt) return next(forbidden('Verify your email before accessing the affiliate portal'));
+  const affiliate = await prisma.affiliate.findUnique({ where: { userId: session.userId } });
+  if (!affiliate || affiliate.status !== 'ACTIVE') return next(forbidden('Affiliate access is not active'));
+  resLocals(request).affiliate = affiliate;
+  return next();
+}
+
 export async function requireAdmin(request: Request, _response: Response, next: NextFunction) {
   const session = currentAdmin(request) ?? await getAdminSession(request, { touch: false });
   if (!session) return next(unauthorized());
@@ -213,11 +224,16 @@ export async function requireAdmin(request: Request, _response: Response, next: 
   return next();
 }
 
-type Locals = { userSession?: Awaited<ReturnType<typeof getUserSession>>; adminSession?: Awaited<ReturnType<typeof getAdminSession>> };
+type Locals = {
+  userSession?: Awaited<ReturnType<typeof getUserSession>>;
+  adminSession?: Awaited<ReturnType<typeof getAdminSession>>;
+  affiliate?: Awaited<ReturnType<typeof prisma.affiliate.findUnique>>;
+};
 const resLocals = (request: Request): Locals => (request as Request & { authLocals?: Locals }).authLocals ?? ((request as Request & { authLocals?: Locals }).authLocals = {});
 
 export function currentUser(request: Request) { return resLocals(request).userSession; }
 export function currentAdmin(request: Request) { return resLocals(request).adminSession; }
+export function currentAffiliate(request: Request) { return resLocals(request).affiliate; }
 
 export async function rotateUserCsrfToken(request: Request, response: Response): Promise<string | null> {
   const userSession = currentUser(request);

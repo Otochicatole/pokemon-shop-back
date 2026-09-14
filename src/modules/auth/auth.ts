@@ -63,8 +63,20 @@ function issueVerificationEmail(userId: string, to: string) {
   })();
 }
 
-function toPublicUser(user: { id: string; email: string; name: string | null; emailVerifiedAt: Date | null }) {
-  return { id: user.id, email: user.email, name: user.name, emailVerified: Boolean(user.emailVerifiedAt) };
+type PublicAffiliate = { id: string; publicName: string };
+
+function toPublicUser(
+  user: { id: string; email: string; name: string | null; emailVerifiedAt: Date | null },
+  affiliate: PublicAffiliate | null = null,
+) {
+  return { id: user.id, email: user.email, name: user.name, emailVerified: Boolean(user.emailVerifiedAt), affiliate };
+}
+
+function findActiveAffiliate(prisma: PrismaClient, userId: string) {
+  return prisma.affiliate.findFirst({
+    where: { userId, status: 'ACTIVE' },
+    select: { id: true, publicName: true },
+  });
 }
 
 type AuthRouterOptions = {
@@ -96,14 +108,17 @@ export function createAuthRouter(prisma: PrismaClient, options: AuthRouterOption
     if (!user || !user.passwordHash || !(await verifyPassword(user.passwordHash, input.password))) throw unauthorized('Invalid credentials');
     if (user.status !== 'ACTIVE') throw unauthorized('Invalid credentials');
     const session = await createUserSession(user.id, res, req, options.onSessionRevoked);
-    return res.status(200).json({ user: toPublicUser(user), csrfToken: session.csrfToken });
+    return res.status(200).json({ user: toPublicUser(user, await findActiveAffiliate(prisma, user.id)), csrfToken: session.csrfToken });
   });
 
   router.post('/logout', async (req, res) => {
     await revokeUserSession(req, res, options.onSessionRevoked);
     return res.status(204).send();
   });
-  router.get('/me', requireUser, (req, res) => res.json({ user: toPublicUser(currentUser(req)!.user) }));
+  router.get('/me', requireUser, async (req, res) => {
+    const session = currentUser(req)!;
+    return res.json({ user: toPublicUser(session.user, await findActiveAffiliate(prisma, session.userId)) });
+  });
 
   router.post('/verify-email', async (req, res) => {
     const input = tokenSchema.parse(req.body);

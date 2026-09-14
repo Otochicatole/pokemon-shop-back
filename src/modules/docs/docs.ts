@@ -57,9 +57,10 @@ const orderInputSchema = z.object({
   items: z.array(z.object({ productId: z.string().uuid(), quantity: z.number().int().min(1).max(100), productVersion: z.number().int().min(1) })).min(1).max(50),
   paymentMethod: z.enum(['BANK_TRANSFER', 'MERCADO_PAGO']),
   fulfillment: fulfillmentInputSchema,
+  sellerFulfillments: z.array(z.object({ sellerKey: z.string(), fulfillment: fulfillmentInputSchema })).optional(),
   pointsToRedeem: z.number().int().min(0).max(2_000_000_000).default(0),
 });
-const checkoutOptionsSchema = z.object({ fulfillment: z.object({ shippingZones: z.array(z.object({ id: z.string().uuid(), name: z.string(), provinces: z.array(z.string()), rates: z.array(z.object({ id: z.string().uuid(), name: z.string(), price: moneySchema })) })), pickupPoints: z.array(z.object({ id: z.string().uuid(), name: z.string(), address: z.string() })) }), paymentMethods: z.object({ BANK_TRANSFER: z.boolean(), MERCADO_PAGO: z.boolean() }) });
+const checkoutOptionsSchema = z.object({ fulfillment: z.object({ shippingZones: z.array(z.object({ id: z.string().uuid(), name: z.string(), provinces: z.array(z.string()), rates: z.array(z.object({ id: z.string().uuid(), name: z.string(), price: moneySchema })) })), pickupPoints: z.array(z.object({ id: z.string().uuid(), name: z.string(), address: z.string() })) }), sellers: z.array(z.object({ sellerKey: z.string(), seller: z.object({ type: z.enum(['STORE', 'AFFILIATE']), id: z.string().uuid().nullable(), name: z.string() }), shippingZones: z.array(z.unknown()), pickupPoints: z.array(z.unknown()) })).optional(), paymentMethods: z.object({ BANK_TRANSFER: z.boolean(), MERCADO_PAGO: z.boolean() }) });
 const loyaltyProgramSchema = z.object({
   enabled: z.boolean(),
   currency: z.literal(BASE_CURRENCY),
@@ -174,6 +175,8 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
   registry.register('SupportConversation', supportConversationSchema);
   registry.register('SupportMessage', supportMessageResponseSchema);
   registry.register('NewsItem', publicNewsItemSchema);
+  const affiliateProfileSchema = z.object({ id: z.string().uuid(), userId: z.string().uuid(), publicName: z.string(), contactPhone: z.string().nullable(), payoutAccountLast4: z.string().nullable(), status: z.enum(['ACTIVE', 'SUSPENDED']), version: z.number().int() }).passthrough();
+  const affiliateListingSchema = z.object({ id: z.string().uuid(), status: z.enum(['DRAFT', 'PENDING_REVIEW', 'CHANGES_REQUESTED', 'REJECTED', 'APPROVED']), product: z.unknown() }).passthrough();
   const envelope = (schema: z.ZodType) => z.object({ data: schema, meta: z.record(z.string(), z.unknown()).optional() });
   const adminSecurity = [{ adminCookie: [] }];
   const userSecurity = [{ userCookie: [] }];
@@ -242,6 +245,15 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
   registry.registerPath({ method: 'get', path: '/api/v2/catalog/products/{slug}', tags: ['Catalog'], request: { params: z.object({ slug: z.string().min(1) }) }, responses: { 200: { description: 'Published product detail', content: { 'application/json': { schema: envelope(catalogProductSchema) } } }, 404: { description: 'Product not found', content: { 'application/json': { schema: problemSchema } } } } });
   registry.registerPath({ method: 'get', path: '/api/v2/news', tags: ['News'], summary: 'List active news items within their publication window', request: { query: publicNewsQuerySchema }, responses: { 200: { description: 'Public news carousel items', content: { 'application/json': { schema: envelope(z.array(publicNewsItemSchema)) } } }, 400: publicErrors[400] } });
   registry.registerPath({ method: 'get', path: '/api/v2/checkout/options', tags: ['Checkout'], responses: { 200: { description: 'Available fulfillment and payment methods', content: { 'application/json': { schema: envelope(checkoutOptionsSchema) } } } } });
+  registry.registerPath({ method: 'post', path: '/api/v2/checkout/options', tags: ['Checkout'], security: userSecurity, request: { headers: csrfHeader, body: { required: true, content: { 'application/json': { schema: z.object({ items: z.array(z.object({ productId: z.string().uuid(), quantity: z.number().int().min(1), productVersion: z.number().int().min(1) })) }) } } } }, responses: { 200: { description: 'Fulfillment options grouped by seller', content: { 'application/json': { schema: envelope(checkoutOptionsSchema) } } }, ...publicErrors } });
+  registry.registerPath({ method: 'get', path: '/api/v2/affiliate/profile', tags: ['Affiliate portal'], security: userSecurity, responses: { 200: { description: 'Authenticated affiliate profile', content: { 'application/json': { schema: envelope(affiliateProfileSchema) } } }, 401: publicErrors[401], 403: publicErrors[403] } });
+  registry.registerPath({ method: 'patch', path: '/api/v2/affiliate/profile', tags: ['Affiliate portal'], security: userSecurity, request: { headers: csrfHeader, body: { required: true, content: { 'application/json': { schema: z.object({ expectedVersion: z.number().int().min(1), publicName: z.string().max(120).optional(), contactPhone: z.string().nullable().optional(), payoutAccount: z.string().nullable().optional() }) } } } }, responses: { 200: { description: 'Affiliate profile updated', content: { 'application/json': { schema: envelope(affiliateProfileSchema) } } }, ...publicErrors } });
+  registry.registerPath({ method: 'get', path: '/api/v2/affiliate/listings', tags: ['Affiliate portal'], security: userSecurity, responses: { 200: { description: 'Listings owned by the authenticated affiliate', content: { 'application/json': { schema: z.array(affiliateListingSchema) } } }, ...publicErrors } });
+  registry.registerPath({ method: 'post', path: '/api/v2/affiliate/listings', tags: ['Affiliate portal'], security: userSecurity, request: { headers: csrfHeader }, responses: { 201: { description: 'Inactive draft listing created', content: { 'application/json': { schema: envelope(z.object({ id: z.string().uuid(), productId: z.string().uuid() })) } } }, ...publicErrors } });
+  registry.registerPath({ method: 'post', path: '/api/v2/affiliate/listings/{id}/submit', tags: ['Affiliate portal'], security: userSecurity, request: { params: z.object({ id: z.string().uuid() }), headers: csrfHeader }, responses: { 200: { description: 'Listing sent to first administrative review', content: { 'application/json': { schema: envelope(z.object({ id: z.string().uuid(), status: z.string() })) } } }, ...publicErrors } });
+  registry.registerPath({ method: 'post', path: '/api/v2/affiliate/listings/{id}/images', tags: ['Affiliate portal'], security: userSecurity, request: { params: z.object({ id: z.string().uuid() }), headers: csrfHeader }, responses: { 201: { description: 'Images attached through the public media pipeline', content: { 'application/json': { schema: envelope(z.object({ fileIds: z.array(z.string().uuid()) })) } } }, ...publicErrors } });
+  registry.registerPath({ method: 'get', path: '/api/v2/affiliate/orders', tags: ['Affiliate portal'], security: userSecurity, responses: { 200: { description: 'Seller orders owned by the authenticated affiliate', content: { 'application/json': { schema: z.array(z.unknown()) } } }, ...publicErrors } });
+  registry.registerPath({ method: 'get', path: '/api/v2/affiliate/balance', tags: ['Affiliate portal'], security: userSecurity, responses: { 200: { description: 'Immutable ledger summary and movements', content: { 'application/json': { schema: envelope(z.unknown()) } } }, ...publicErrors } });
   registry.registerPath({
     method: 'get', path: '/api/v2/loyalty/program', tags: ['Loyalty'], summary: 'Read the active points and redemption rules',
     responses: { 200: { description: 'Current loyalty program', content: { 'application/json': { schema: envelope(z.object({ program: loyaltyProgramSchema })) } } } },
@@ -354,6 +366,7 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
       { name: 'Admin products' },
       { name: 'Admin inventory' },
       { name: 'Admin suppliers', description: 'Supplier directory and lifecycle management.' },
+      { name: 'Admin affiliates', description: 'Affiliate onboarding, editorial review, incidents and payouts.' },
       { name: 'Admin orders' },
       { name: 'Admin payments' },
       { name: 'Admin loyalty' },
@@ -362,6 +375,7 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
       { name: 'Admin audit' },
       { name: 'Catalog' },
       { name: 'Checkout' },
+      { name: 'Affiliate portal', description: 'Authenticated affiliate publications, seller orders, logistics and balance.' },
       { name: 'Orders' },
       { name: 'Loyalty', description: 'Configurable purchase points, redemption limits and account movements.' },
       { name: 'Support', description: 'Customer support inbox. Realtime events use /api/v2/support/ws?role=user with the customer cookie.' },

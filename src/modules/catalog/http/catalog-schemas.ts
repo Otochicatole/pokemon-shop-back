@@ -80,6 +80,7 @@ export const catalogProductSchema = z.object({
     sortOrder: z.number().int(),
   })),
   updatedAt: z.string().datetime(),
+  seller: z.object({ type: z.enum(['STORE', 'AFFILIATE']), id: z.string().uuid().nullable(), name: z.string() }),
 });
 
 export const catalogFacetOptionSchema = z.object({

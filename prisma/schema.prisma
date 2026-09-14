@@ -89,6 +89,7 @@ enum PaymentStatus {
   PENDING
   UNDER_REVIEW
   APPROVED
+  PARTIALLY_REFUNDED
   REJECTED
   FAILED
   REFUNDED
@@ -162,6 +163,75 @@ enum NotificationType {
   TRANSFER_RECEIPT_SUBMITTED
   PAYMENT_REQUIRES_REVIEW
   PAYMENT_APPROVED
+  AFFILIATE_LISTING_SUBMITTED
+  AFFILIATE_LISTING_REVIEWED
+  AFFILIATE_ORDER_CREATED
+  AFFILIATE_ORDER_STATUS_CHANGED
+  AFFILIATE_ISSUE_OPENED
+  AFFILIATE_PAYOUT_REQUESTED
+  AFFILIATE_PAYOUT_UPDATED
+}
+
+enum AffiliateStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum AffiliateListingStatus {
+  DRAFT
+  PENDING_REVIEW
+  CHANGES_REQUESTED
+  REJECTED
+  APPROVED
+}
+
+enum SellerType {
+  STORE
+  AFFILIATE
+}
+
+enum SellerOrderStatus {
+  PENDING_PAYMENT
+  PAID
+  PREPARING
+  READY_FOR_PICKUP
+  PICKED_UP
+  SHIPPED
+  COMPLETED
+  CANCELLATION_REQUESTED
+  CANCELLED
+  DISPUTED
+  REFUNDED
+}
+
+enum AffiliateLedgerBucket {
+  PENDING
+  AVAILABLE
+  RESERVED
+  PAID
+}
+
+enum AffiliateLedgerType {
+  SALE_PENDING
+  SALE_RELEASED
+  SALE_REVERSED
+  PAYOUT_RESERVED
+  PAYOUT_PAID
+  PAYOUT_RELEASED
+  ADJUSTMENT
+}
+
+enum AffiliatePayoutStatus {
+  REQUESTED
+  PROCESSING
+  PAID
+  REJECTED
+}
+
+enum AffiliateIssueStatus {
+  OPEN
+  RESOLVED_COMPLETED
+  RESOLVED_REFUNDED
 }
 
 model User {
@@ -182,6 +252,8 @@ model User {
   loyaltyTransactions  LoyaltyTransaction[]
   supportConversations SupportConversation[]
   notifications        Notification[]       @relation("UserNotifications")
+  affiliate            Affiliate?
+  affiliateIssues      AffiliateIssue[]
 }
 
 model UserOAuthAccount {
@@ -248,6 +320,10 @@ model Admin {
   loyaltyProgramUpdates LoyaltyProgram[]
   transferSettingsUpdates TransferSettings[]
   notifications         Notification[]      @relation("AdminNotifications")
+  affiliateReviews      AffiliateListing[]  @relation("AffiliateListingReviews")
+  affiliatePayouts      AffiliatePayoutRequest[] @relation("AffiliatePayoutProcessors")
+  affiliateIssueResolutions AffiliateIssue[] @relation("AffiliateIssueResolutions")
+  affiliateProgramUpdates AffiliateProgramSettings[]
 }
 
 model LoyaltyProgram {
@@ -362,6 +438,65 @@ model Supplier {
   @@index([updatedAt])
 }
 
+model Affiliate {
+  id                    String                @id @default(uuid())
+  userId                String                @unique
+  publicName            String
+  contactPhone          String?
+  payoutAccountCipher   String?
+  payoutAccountLast4    String?
+  status                AffiliateStatus       @default(ACTIVE)
+  version               Int                   @default(1)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  user                  User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listings              AffiliateListing[]
+  products              Product[]
+  shippingZones         ShippingZone[]
+  pickupPoints          PickupPoint[]
+  sellerOrders          SellerOrder[]
+  ledgerEntries         AffiliateLedgerEntry[]
+  payoutRequests        AffiliatePayoutRequest[]
+  issues                AffiliateIssue[]
+  imageUploads          ProductImage[]
+  inventoryChanges      InventoryAdjustment[]
+
+  @@index([status, publicName])
+  @@index([updatedAt])
+}
+
+model AffiliateProgramSettings {
+  id             String   @id @default("default")
+  commissionBps  Int      @default(1000)
+  version        Int      @default(1)
+  updatedById    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  updatedBy      Admin?   @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([updatedById])
+}
+
+model AffiliateListing {
+  id            String                 @id @default(uuid())
+  productId     String                 @unique
+  affiliateId   String
+  status        AffiliateListingStatus @default(DRAFT)
+  reviewNote    String?
+  submittedAt   DateTime?
+  reviewedAt    DateTime?
+  reviewedById  String?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  product       Product                @relation(fields: [productId], references: [id], onDelete: Cascade)
+  affiliate     Affiliate              @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  notifications Notification[]
+  reviewedBy    Admin?                 @relation("AffiliateListingReviews", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([affiliateId, status, updatedAt])
+  @@index([status, submittedAt])
+}
+
 model Product {
   id            String                 @id @default(uuid())
   sku           String                 @unique
@@ -376,6 +511,7 @@ model Product {
   version       Int                    @default(1)
   publishedAt   DateTime?
   archivedAt    DateTime?
+  affiliateId   String?
   createdAt     DateTime               @default(now())
   updatedAt     DateTime               @updatedAt
   pokemonCard   PokemonCardDetails?
@@ -384,11 +520,14 @@ model Product {
   orderItems    OrderItem[]
   inventoryLogs InventoryAdjustment[]
   reservations  InventoryReservation[]
+  affiliate     Affiliate?              @relation(fields: [affiliateId], references: [id], onDelete: SetNull)
+  affiliateListing AffiliateListing?
 
   @@index([status, kind])
   @@index([status, priceMinor])
   @@index([status, publishedAt])
   @@index([updatedAt])
+  @@index([affiliateId, status])
 }
 
 model PokemonCardDetails {
@@ -437,9 +576,11 @@ model ProductImage {
   createdAt   DateTime   @default(now())
   retiredAt   DateTime?
   createdById String?
+  createdByAffiliateId String?
   product     Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
   file        StoredFile @relation(fields: [fileId], references: [id], onDelete: Restrict)
   createdBy   Admin?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdByAffiliate Affiliate? @relation(fields: [createdByAffiliateId], references: [id], onDelete: SetNull)
 
   @@index([productId, retiredAt, sortOrder])
 }
@@ -452,8 +593,11 @@ model ShippingZone {
   rates     ShippingRate[]
   createdAt DateTime               @default(now())
   updatedAt DateTime               @updatedAt
+  affiliateId String?
+  affiliate   Affiliate? @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
 
   @@index([active, name])
+  @@index([affiliateId, active, name])
 }
 
 model ShippingZoneProvince {
@@ -485,8 +629,11 @@ model PickupPoint {
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  affiliateId String?
+  affiliate   Affiliate? @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
 
   @@index([active, name])
+  @@index([affiliateId, active, name])
 }
 
 model Order {
@@ -536,6 +683,7 @@ model Order {
   outboxMessages            OutboxMessage[]
   loyaltyTransactions       LoyaltyTransaction[]
   notifications              Notification[]
+  sellerOrders              SellerOrder[]
 
   @@unique([userId, idempotencyKey])
   @@index([userId, createdAt])
@@ -548,6 +696,7 @@ model Order {
 model OrderItem {
   id              String  @id @default(uuid())
   orderId         String
+  sellerOrderId   String?
   productId       String
   sku             String
   productName     String
@@ -557,15 +706,18 @@ model OrderItem {
   quantity        Int
   lineTotalMinor  BigInt
   order           Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sellerOrder     SellerOrder? @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
   product         Product @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@index([orderId])
   @@index([imageFileId])
+  @@index([sellerOrderId])
 }
 
 model InventoryReservation {
   id         String    @id @default(uuid())
   orderId    String
+  sellerOrderId String?
   productId  String
   quantity   Int
   expiresAt  DateTime
@@ -573,10 +725,133 @@ model InventoryReservation {
   consumedAt DateTime?
   createdAt  DateTime  @default(now())
   order      Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sellerOrder SellerOrder? @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
   product    Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@unique([orderId, productId])
   @@index([expiresAt, releasedAt, consumedAt])
+  @@index([sellerOrderId])
+}
+
+model SellerOrder {
+  id                     String            @id @default(uuid())
+  orderId                String
+  number                 String            @unique
+  sellerType             SellerType
+  affiliateId            String?
+  sellerName             String            
+  sellerContactPhone     String?
+  status                 SellerOrderStatus @default(PENDING_PAYMENT)
+  version                Int               @default(1)
+  subtotalMinor          BigInt
+  shippingMinor          BigInt
+  commissionBps          Int               @default(0)
+  commissionMinor        BigInt            @default(0)
+  sellerNetMinor         BigInt            @default(0)
+  fulfillmentType        FulfillmentType
+  shippingRateId         String?
+  pickupPointId          String?
+  shippingZoneName       String?
+  shippingRateName       String?
+  shippingRatePriceMinor BigInt?
+  pickupPointName        String?
+  pickupPointAddress     String?
+  recipientName          String?
+  recipientPhone         String?
+  addressLine1           String?
+  addressLine2           String?
+  city                   String?
+  province               String?
+  postalCode             String?
+  autoCompleteAt         DateTime?
+  completedAt            DateTime?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+  order                  Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  affiliate              Affiliate?        @relation(fields: [affiliateId], references: [id], onDelete: SetNull)
+  items                  OrderItem[]
+  reservations           InventoryReservation[]
+  statusHistory          SellerOrderHistory[]
+  ledgerEntries          AffiliateLedgerEntry[]
+  issues                 AffiliateIssue[]
+  refunds                RefundRecord[]
+  notifications          Notification[]
+
+  @@index([orderId, status])
+  @@index([affiliateId, status, updatedAt])
+  @@index([status, autoCompleteAt])
+}
+
+model SellerOrderHistory {
+  id            String            @id @default(uuid())
+  sellerOrderId String
+  fromStatus    SellerOrderStatus?
+  toStatus      SellerOrderStatus
+  note          String?
+  changedByType String?
+  changedById   String?
+  createdAt     DateTime          @default(now())
+  sellerOrder   SellerOrder       @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
+
+  @@index([sellerOrderId, createdAt])
+}
+
+model AffiliateIssue {
+  id              String              @id @default(uuid())
+  sellerOrderId   String
+  affiliateId     String
+  openedByUserId  String
+  status          AffiliateIssueStatus @default(OPEN)
+  reason          String
+  resolutionNote  String?
+  resolvedById    String?
+  createdAt       DateTime            @default(now())
+  resolvedAt      DateTime?
+  sellerOrder     SellerOrder         @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
+  affiliate       Affiliate           @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  openedBy        User                @relation(fields: [openedByUserId], references: [id], onDelete: Restrict)
+  resolvedBy      Admin?              @relation("AffiliateIssueResolutions", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([affiliateId, status, createdAt])
+  @@index([sellerOrderId, status])
+}
+
+model AffiliateLedgerEntry {
+  id            String                  @id @default(uuid())
+  affiliateId   String
+  sellerOrderId String?
+  payoutId      String?
+  bucket        AffiliateLedgerBucket
+  type          AffiliateLedgerType
+  amountMinor   BigInt
+  note          String?
+  createdAt     DateTime                @default(now())
+  affiliate     Affiliate               @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  sellerOrder   SellerOrder?            @relation(fields: [sellerOrderId], references: [id], onDelete: SetNull)
+  payout        AffiliatePayoutRequest? @relation(fields: [payoutId], references: [id], onDelete: SetNull)
+
+  @@index([affiliateId, bucket, createdAt])
+  @@index([sellerOrderId, type])
+  @@index([payoutId])
+}
+
+model AffiliatePayoutRequest {
+  id                String                @id @default(uuid())
+  affiliateId       String
+  amountMinor       BigInt
+  status            AffiliatePayoutStatus @default(REQUESTED)
+  externalReference String?
+  note              String?
+  version           Int                   @default(1)
+  processedById     String?
+  createdAt         DateTime              @default(now())
+  processedAt       DateTime?
+  affiliate         Affiliate             @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  processedBy       Admin?               @relation("AffiliatePayoutProcessors", fields: [processedById], references: [id], onDelete: SetNull)
+  ledgerEntries     AffiliateLedgerEntry[]
+  notifications     Notification[]
+
+  @@index([affiliateId, status, createdAt])
 }
 
 model Payment {
@@ -658,6 +933,7 @@ model WebhookEvent {
 model RefundRecord {
   id                String   @id @default(uuid())
   paymentId         String
+  sellerOrderId     String?
   fullRefundKey     String?  @unique
   amountMinor       BigInt
   currency          String   @default("USD")
@@ -666,7 +942,10 @@ model RefundRecord {
   createdAt         DateTime @default(now())
   createdById       String
   payment           Payment  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  sellerOrder        SellerOrder? @relation(fields: [sellerOrderId], references: [id], onDelete: SetNull)
   createdBy         Admin    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([sellerOrderId, createdAt])
 }
 
 model OrderStatusHistory {
@@ -689,9 +968,13 @@ model InventoryAdjustment {
   delta       Int
   reason      String
   createdAt   DateTime @default(now())
-  createdById String
+  createdById String?
+  affiliateId String?
   product     Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
-  createdBy   Admin    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy   Admin?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  affiliate   Affiliate? @relation(fields: [affiliateId], references: [id], onDelete: SetNull)
+
+  @@index([affiliateId, createdAt])
 }
 
 model StoredFile {
@@ -805,17 +1088,26 @@ model Notification {
   message              String
   dedupeKey            String                   @unique
   orderId              String?
+  sellerOrderId        String?
+  affiliateListingId    String?
+  payoutRequestId       String?
   supportConversationId String?
   readAt               DateTime?
   createdAt            DateTime                 @default(now())
   user                 User?                    @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
   admin                Admin?                   @relation("AdminNotifications", fields: [adminId], references: [id], onDelete: Cascade)
   order                Order?                   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sellerOrder          SellerOrder?             @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
+  affiliateListing     AffiliateListing?       @relation(fields: [affiliateListingId], references: [id], onDelete: Cascade)
+  payoutRequest        AffiliatePayoutRequest? @relation(fields: [payoutRequestId], references: [id], onDelete: Cascade)
   supportConversation SupportConversation?     @relation(fields: [supportConversationId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt, createdAt])
   @@index([adminId, readAt, createdAt])
   @@index([orderId, createdAt])
+  @@index([sellerOrderId, createdAt])
+  @@index([affiliateListingId, createdAt])
+  @@index([payoutRequestId, createdAt])
   @@index([supportConversationId, createdAt])
 }
 

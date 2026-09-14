@@ -54,6 +54,7 @@ export interface CatalogProduct {
   pokemonCard: CatalogPokemonCard | null;
   images: Array<{ id: string; url: string; altText: string | null; sortOrder: number }>;
   updatedAt: Date;
+  seller: { type: 'STORE' | 'AFFILIATE'; id: string | null; name: string };
 }
 
 export interface CatalogFacetOption {

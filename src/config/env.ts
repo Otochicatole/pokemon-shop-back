@@ -10,6 +10,7 @@ const rawSchema = z.object({
   COOKIE_SECURE: z.string().default('false'),
   SWAGGER_ENABLED: z.string().default('true'),
   SESSION_SECRET: z.string().min(16).default('development-only-session-secret-change-me'),
+  AFFILIATE_BANK_ENCRYPTION_KEY: z.string().min(16).optional(),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_REDIRECT_URI: z.string().url().default('http://localhost:3001/api/v2/auth/google/callback'),
@@ -27,7 +28,7 @@ const rawSchema = z.object({
 const parsed = rawSchema.parse(process.env);
 
 if (parsed.NODE_ENV === 'production') {
-  const required = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'MERCADOPAGO_ACCESS_TOKEN', 'MERCADOPAGO_WEBHOOK_SECRET', 'SMTP_HOST', 'SMTP_FROM'] as const;
+  const required = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'MERCADOPAGO_ACCESS_TOKEN', 'MERCADOPAGO_WEBHOOK_SECRET', 'SMTP_HOST', 'SMTP_FROM', 'AFFILIATE_BANK_ENCRYPTION_KEY'] as const;
   for (const key of required) {
     if (!parsed[key]) throw new Error(`Missing required production environment variable: ${key}`);
   }

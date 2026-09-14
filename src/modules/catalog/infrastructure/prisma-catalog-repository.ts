@@ -8,6 +8,8 @@ const include = {
   pokemonCard: true,
   inventory: true,
   images: { where: { retiredAt: null }, orderBy: { sortOrder: 'asc' as const }, include: { file: true } },
+  affiliate: { select: { id: true, publicName: true, status: true } },
+  affiliateListing: { select: { status: true } },
 } satisfies Prisma.ProductInclude;
 type ProductRecord = Prisma.ProductGetPayload<{ include: typeof include }>;
 
@@ -43,6 +45,9 @@ const mapProduct = (product: ProductRecord): CatalogProduct => ({
     sortOrder: image.sortOrder,
   })),
   updatedAt: product.updatedAt,
+  seller: product.affiliate && product.affiliate.status === 'ACTIVE'
+    ? { type: 'AFFILIATE', id: product.affiliate.id, name: product.affiliate.publicName }
+    : { type: 'STORE', id: null, name: 'Card Shop' },
 });
 
 function countOptions(values: Array<string | null>): CatalogFacetOption[] {
@@ -70,7 +75,7 @@ export class PrismaCatalogRepository implements CatalogRepository {
   public constructor(private readonly prisma: PrismaClient) {}
 
   public async listPublished(query: CatalogQuery) {
-    const and: Prisma.ProductWhereInput[] = [{ status: ProductStatus.PUBLISHED }];
+    const and: Prisma.ProductWhereInput[] = [{ status: ProductStatus.PUBLISHED }, { OR: [{ affiliateId: null }, { affiliate: { is: { status: 'ACTIVE' } } }] }, { OR: [{ affiliateId: null }, { affiliateListing: { is: { status: 'APPROVED' } } }] }];
 
     if (query.kind?.length) and.push({ kind: { in: query.kind } });
     if (query.minPriceMinor || query.maxPriceMinor) {
@@ -144,13 +149,13 @@ export class PrismaCatalogRepository implements CatalogRepository {
   }
 
   public async findPublishedBySlug(slug: string) {
-    const product = await this.prisma.product.findFirst({ where: { slug, status: ProductStatus.PUBLISHED }, include });
+    const product = await this.prisma.product.findFirst({ where: { slug, status: ProductStatus.PUBLISHED, OR: [{ affiliateId: null }, { affiliate: { is: { status: 'ACTIVE' } } }], AND: [{ OR: [{ affiliateId: null }, { affiliateListing: { is: { status: 'APPROVED' } } }] }] }, include });
     return product ? mapProduct(product) : null;
   }
 
   public async getFilters() {
     const products = await this.prisma.product.findMany({
-      where: { status: ProductStatus.PUBLISHED },
+      where: { status: ProductStatus.PUBLISHED, OR: [{ affiliateId: null }, { affiliate: { is: { status: 'ACTIVE' } } }], AND: [{ OR: [{ affiliateId: null }, { affiliateListing: { is: { status: 'APPROVED' } } }] }] },
       select: {
         kind: true,
         priceMinor: true,

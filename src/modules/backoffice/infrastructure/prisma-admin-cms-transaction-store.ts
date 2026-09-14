@@ -14,6 +14,7 @@ import type { BaseCurrency } from '../../../shared/currency.js';
 import type { SupportRealtimeHub } from '../../support/support-realtime.js';
 import { createOrderStatusNotification, publishNotifications } from '../../notifications/index.js';
 import { getTransferSettings as readTransferSettings, mapTransferSettings, transferSettingsConfigured } from '../../payments/index.js';
+import { settleSellerOrdersOnPayment } from '../../orders/index.js';
 
 type Coordinator = { run<T>(operation: () => Promise<T>): Promise<T> };
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -590,6 +591,7 @@ export class PrismaAdminCmsTransactionStore {
         const history = await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'PAID', note: note ?? 'Transfer approved', changedById: actor.adminId } });
         notificationIds.push((await createOrderStatusNotification(tx, order, history)).id);
         await settleOrderLoyalty(tx, order.id);
+        await settleSellerOrdersOnPayment(tx, order.id);
       } else {
         await updateOrderVersion(tx, order.id, expectedVersion, { status: 'CANCELLED' });
         await releaseReservations(tx, order.id);
@@ -636,6 +638,7 @@ export class PrismaAdminCmsTransactionStore {
       await updateOrderVersion(tx, order.id, expectedVersion, { status: 'PAID' });
       const history = await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'PAID', note: 'Late payment manually accepted after stock validation', changedById: actor.adminId } });
       await settleOrderLoyalty(tx, order.id);
+      await settleSellerOrdersOnPayment(tx, order.id);
       await tx.auditLog.create({ data: auditData(actor, 'LATE_PAYMENT_FULFILLED', 'Order', order.id, { number }) });
       return { result: { number, status: 'PAID', version: expectedVersion + 1 } as OrderStatusMutationDto, notificationIds: [(await createOrderStatusNotification(tx, order, history)).id] };
       });
