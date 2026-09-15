@@ -208,7 +208,7 @@ export class PrismaAdminCmsTransactionStore {
 
   async dashboard(range: 'TODAY' | '7D' | '30D') {
     const since = dateRange(range);
-    const [paidEvents, refunds, orderGroups, productGroups, inventories, pendingTransfers, mercadoReview, recentOrders, recentActivity] = await Promise.all([
+    const [paidEvents, refunds, orderGroups, productGroups, inventories, pendingTransfers, mercadoReview, webhookBacklog, webhookExhausted, webhookLastError, recentOrders, recentActivity] = await Promise.all([
       this.prisma.orderStatusHistory.findMany({ where: { toStatus: 'PAID', createdAt: { gte: since } }, select: { orderId: true, order: { select: { totalMinor: true, currency: true } } }, distinct: ['orderId'] }),
       this.prisma.refundRecord.aggregate({ where: { createdAt: { gte: since } }, _sum: { amountMinor: true }, _count: true }),
       this.prisma.order.groupBy({ by: ['status'], where: { createdAt: { gte: since } }, _count: true }),
@@ -216,6 +216,9 @@ export class PrismaAdminCmsTransactionStore {
       this.prisma.inventory.findMany({ where: { product: { status: 'PUBLISHED' } }, select: { onHand: true, reserved: true } }),
       this.prisma.transferReceipt.count({ where: { review: 'PENDING' } }),
       this.prisma.payment.count({ where: { method: 'MERCADO_PAGO', status: 'REQUIRES_REVIEW' } }),
+      this.prisma.webhookEvent.count({ where: { provider: 'mercadopago', processedAt: null, failedAt: null } }),
+      this.prisma.webhookEvent.count({ where: { provider: 'mercadopago', failedAt: { not: null } } }),
+      this.prisma.webhookEvent.findFirst({ where: { provider: 'mercadopago', lastError: { not: null } }, orderBy: { updatedAt: 'desc' }, select: { lastError: true, updatedAt: true } }),
       this.prisma.order.findMany({ take: 8, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], include: orderDetailInclude }),
       this.prisma.auditLog.findMany({ take: 10, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }),
     ]);
@@ -233,6 +236,7 @@ export class PrismaAdminCmsTransactionStore {
         lowStock: inventories.filter((value) => value.onHand - value.reserved > 0 && value.onHand - value.reserved <= 5).length,
       },
       attention: { transferReviews: pendingTransfers, mercadoPagoReviews: mercadoReview },
+      mercadoPagoWebhook: { backlog: webhookBacklog, exhausted: webhookExhausted, lastError: webhookLastError?.lastError ?? null, lastErrorAt: webhookLastError?.updatedAt ?? null },
       recentOrders: recentOrders.map((order) => ({ id: order.id, number: order.number, status: order.status, total: money(order.totalMinor), createdAt: order.createdAt })),
       recentActivity: recentActivity.map((entry) => ({ ...entry, metadata: redact(parseJson(entry.metadata ?? 'null')) })),
     };

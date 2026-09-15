@@ -19,6 +19,12 @@ Swagger queda disponible en `http://localhost:3000/docs` y el documento OpenAPI 
 
 Con el frontend ejecutándose en el puerto 3001, el CMS se abre en `http://localhost:3001/admin/login`.
 
+### Mercado Pago Checkout Pro
+
+El checkout nuevo usa Orders API y convierte los importes internos en USD a ARS con la cotización `venta` de DolarAPI. Está desactivado por defecto. Para habilitarlo, configurá `MERCADOPAGO_ENABLED=true`, `MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_WEBHOOK_SECRET`, `MERCADOPAGO_COLLECTOR_ID`, `PUBLIC_API_URL` y `PUBLIC_WEB_URL` en el backend. En producción ambas URLs deben ser públicas y usar HTTPS. Configurá en Mercado Pago el evento **Order (Mercado Pago)** apuntando a `${PUBLIC_API_URL}/api/v2/webhooks/mercado-pago`.
+
+Primero desplegá la migración con `MERCADOPAGO_ENABLED=false`, cargá los secretos y probá con usuarios/tarjetas de prueba de Mercado Pago. El worker durable procesa el inbox de webhooks cada cinco segundos; el dashboard administrativo muestra backlog, errores y eventos agotados.
+
 ## Arquitectura
 
 El backend usa screaming architecture por capacidad de negocio. Los módulos públicos están en `src/modules` y separan `domain`, `application`, `infrastructure` y `http`; la composición manual de Prisma, sesiones, pagos, correo y almacenamiento se realiza en `src/app/composition-root.ts`. Los casos de uso no dependen de Express ni de Prisma directamente.
@@ -38,7 +44,7 @@ El catálogo público expone `/api/v2/catalog/products` y `/api/v2/catalog/filte
 - El checkout usa una transacción corta y una cola de escrituras para impedir doble reserva.
 - Las imágenes y comprobantes se almacenan fuera del webroot y se sirven mediante endpoints autorizados.
 - Retirar una imagen crea un trabajo persistente con 24 horas de gracia. El job verifica snapshots de órdenes, mueve el archivo a `storage/tmp/quarantine` y recién después elimina sus registros y el archivo; cada etapa es reanudable. Se ejecuta al iniciar y cada cinco minutos, y también puede operarse manualmente con `pnpm media:cleanup`.
-- En producción se requieren secretos, HTTPS en el proxy, SMTP, credenciales de Google y Mercado Pago.
+- En producción se requieren secretos, HTTPS en el proxy, SMTP y credenciales de Google. Mercado Pago sólo exige sus credenciales y URLs públicas cuando `MERCADOPAGO_ENABLED=true`.
 
 El proyecto está diseñado para una sola instancia mientras use SQLite y almacenamiento local. Los puertos de persistencia y archivos permiten migrar posteriormente a PostgreSQL, Redis y almacenamiento de objetos.
 

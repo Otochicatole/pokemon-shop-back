@@ -202,6 +202,7 @@ export const adminDashboardDataSchema = z.object({
   orders: z.object({ total: z.number().int(), byStatus: z.record(z.string(), z.number().int()) }),
   products: z.object({ draft: z.number().int(), published: z.number().int(), archived: z.number().int(), outOfStock: z.number().int(), lowStock: z.number().int() }),
   attention: z.object({ transferReviews: z.number().int(), mercadoPagoReviews: z.number().int() }),
+  mercadoPagoWebhook: z.object({ backlog: z.number().int().nonnegative(), exhausted: z.number().int().nonnegative(), lastError: z.string().nullable(), lastErrorAt: nullableDateTime }),
   integrations: z.object({ bankTransfer: z.boolean(), mercadoPago: z.boolean(), smtp: z.boolean() }),
   recentOrders: z.array(z.object({ id: z.string().uuid(), number: z.string(), status: z.enum(orderStatuses), total: adminMoneySchema, createdAt: dateTime })),
   recentActivity: z.array(adminAuditEntrySchema),

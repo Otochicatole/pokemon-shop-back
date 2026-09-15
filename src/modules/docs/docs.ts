@@ -25,6 +25,7 @@ import { publicNewsItemSchema, publicNewsQuerySchema } from '../news/index.js';
 
 extendZodWithOpenApi(z);
 const moneySchema = catalogMoneySchema;
+const providerMoneySchema = z.object({ amountMinor: z.string(), currency: z.literal('ARS') });
 const problemSchema = z.object({
   type: z.string(),
   title: z.string(),
@@ -37,7 +38,7 @@ const problemSchema = z.object({
 });
 const dateTimeSchema = z.string().datetime();
 const orderStatusSchema = z.enum(['PENDING_PAYMENT', 'PAYMENT_REVIEW', 'PAID', 'PREPARING', 'READY_FOR_PICKUP', 'SHIPPED', 'COMPLETED', 'CANCELLED', 'EXPIRED', 'REFUND_RECORDED', 'PAYMENT_REQUIRES_REVIEW', 'IN_FULFILLMENT', 'PARTIALLY_COMPLETED', 'ACTION_REQUIRED']);
-const paymentStatusSchema = z.enum(['PENDING', 'UNDER_REVIEW', 'APPROVED', 'REJECTED', 'FAILED', 'REFUNDED', 'DISPUTED', 'REQUIRES_REVIEW']);
+const paymentStatusSchema = z.enum(['PENDING', 'UNDER_REVIEW', 'APPROVED', 'PARTIALLY_REFUNDED', 'REJECTED', 'FAILED', 'REFUNDED', 'DISPUTED', 'REQUIRES_REVIEW']);
 const loyaltyRedemptionStatusSchema = z.enum(['NONE', 'RESERVED', 'REDEEMED', 'RELEASED', 'RESTORED']);
 const fulfillmentInputSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('PICKUP'), pickupPointId: z.string().uuid() }),
@@ -59,8 +60,9 @@ const orderInputSchema = z.object({
   fulfillment: fulfillmentInputSchema,
   sellerFulfillments: z.array(z.object({ sellerKey: z.string(), fulfillment: fulfillmentInputSchema })).optional(),
   pointsToRedeem: z.number().int().min(0).max(2_000_000_000).default(0),
+  rateSnapshotId: z.string().uuid().optional(),
 });
-const checkoutOptionsSchema = z.object({ fulfillment: z.object({ shippingZones: z.array(z.object({ id: z.string().uuid(), name: z.string(), provinces: z.array(z.string()), rates: z.array(z.object({ id: z.string().uuid(), name: z.string(), price: moneySchema })) })), pickupPoints: z.array(z.object({ id: z.string().uuid(), name: z.string(), address: z.string() })) }), sellers: z.array(z.object({ sellerKey: z.string(), seller: z.object({ type: z.enum(['STORE', 'AFFILIATE']), id: z.string().uuid().nullable(), name: z.string() }), shippingZones: z.array(z.unknown()), pickupPoints: z.array(z.unknown()) })).optional(), paymentMethods: z.object({ BANK_TRANSFER: z.boolean(), MERCADO_PAGO: z.boolean() }) });
+const checkoutOptionsSchema = z.object({ fulfillment: z.object({ shippingZones: z.array(z.object({ id: z.string().uuid(), name: z.string(), provinces: z.array(z.string()), rates: z.array(z.object({ id: z.string().uuid(), name: z.string(), price: moneySchema })) })), pickupPoints: z.array(z.object({ id: z.string().uuid(), name: z.string(), address: z.string() })) }), sellers: z.array(z.object({ sellerKey: z.string(), seller: z.object({ type: z.enum(['STORE', 'AFFILIATE']), id: z.string().uuid().nullable(), name: z.string() }), shippingZones: z.array(z.unknown()), pickupPoints: z.array(z.unknown()) })).optional(), paymentMethods: z.object({ BANK_TRANSFER: z.boolean(), MERCADO_PAGO: z.boolean() }), paymentMethodUnavailableReasons: z.object({ MERCADO_PAGO: z.enum(['NOT_CONFIGURED', 'FX_UNAVAILABLE']).optional() }).optional() });
 const loyaltyProgramSchema = z.object({
   enabled: z.boolean(),
   currency: z.literal(BASE_CURRENCY),
@@ -136,7 +138,8 @@ const publicOrderSchema = z.object({
     method: z.enum(['BANK_TRANSFER', 'MERCADO_PAGO']), status: paymentStatusSchema, bankReference: z.string().nullable(),
     bankInstructions: z.object({ bankName: z.string(), accountHolder: z.string(), cbu: z.string().nullable(), alias: z.string().nullable() }).nullable(),
     receipt: z.object({ fileId: z.string().uuid(), review: z.enum(['PENDING', 'APPROVED', 'REJECTED']), createdAt: dateTimeSchema }).nullable(),
-    checkoutUrl: z.string().nullable(), paymentSessionStatus: z.enum(['READY', 'RETRY_REQUIRED']),
+    checkoutUrl: z.string().nullable(), paymentSessionStatus: z.enum(['READY', 'RETRY_REQUIRED', 'CLOSED']).nullable(),
+    mercadoPago: z.object({ integrationMode: z.enum(['PREFERENCE_V1', 'ORDER_V1']), providerOrderId: z.string().nullable(), checkoutUrl: z.string().nullable(), checkoutStatus: z.enum(['READY', 'RETRY_REQUIRED', 'CLOSED']).nullable(), amount: providerMoneySchema.nullable(), rate: z.object({ source: z.string(), rate: z.string(), fetchedAt: dateTimeSchema, expiresAt: dateTimeSchema }).nullable(), expiresAt: dateTimeSchema.nullable() }).nullable().optional(),
   }).nullable(),
   createdAt: dateTimeSchema,
 });
@@ -189,7 +192,7 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
     401: { description: 'Customer session missing or expired', content: { 'application/json': { schema: problemSchema } } },
     403: { description: 'Email verification or CSRF requirement not met', content: { 'application/json': { schema: problemSchema } } },
     409: { description: 'Product, stock or loyalty balance changed', content: { 'application/json': { schema: problemSchema } } },
-    503: { description: 'Payment provider is not configured or does not support USD', content: { 'application/json': { schema: problemSchema } } },
+    503: { description: 'Mercado Pago is not configured or the DolarAPI quote is temporarily unavailable', content: { 'application/json': { schema: problemSchema } } },
   };
 
   registry.registerPath({
@@ -279,7 +282,7 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
     method: 'post', path: '/api/v2/checkout/preview', tags: ['Checkout'], security: userSecurity,
     request: { headers: csrfHeader, body: { required: true, content: { 'application/json': { schema: orderInputSchema } } } },
     responses: {
-      200: { description: 'Server-calculated quote, including the loyalty discount and points to earn', content: { 'application/json': { schema: envelope(z.object({ subtotal: moneySchema, discount: moneySchema, shipping: moneySchema, total: moneySchema, loyalty: checkoutLoyaltySchema, expiresAt: dateTimeSchema })) } } },
+      200: { description: 'Server-calculated quote, including the loyalty discount and Mercado Pago ARS conversion', content: { 'application/json': { schema: envelope(z.object({ subtotal: moneySchema, discount: moneySchema, shipping: moneySchema, total: moneySchema, loyalty: checkoutLoyaltySchema, expiresAt: dateTimeSchema, mercadoPago: z.object({ rateSnapshotId: z.string().uuid(), source: z.literal('DOLARAPI_BLUE_VENTA'), rate: z.string(), fetchedAt: dateTimeSchema, expiresAt: dateTimeSchema, total: providerMoneySchema }).nullable().optional() })) } } },
       ...publicErrors,
     },
   });
@@ -301,6 +304,16 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
     method: 'get', path: '/api/v2/orders/{number}', tags: ['Orders'], security: userSecurity,
     request: { params: z.object({ number: z.string().min(1) }) },
     responses: { 200: { description: 'Order detail with immutable loyalty snapshot', content: { 'application/json': { schema: envelope(z.object({ order: publicOrderSchema })) } } }, 401: publicErrors[401], 404: { description: 'Order not found', content: { 'application/json': { schema: problemSchema } } } },
+  });
+  registry.registerPath({
+    method: 'post', path: '/api/v2/orders/{number}/payment-session', tags: ['Orders'], security: userSecurity,
+    request: { params: z.object({ number: z.string().min(1) }), headers: csrfHeader },
+    responses: { 200: { description: 'Existing or recovered Mercado Pago checkout session', content: { 'application/json': { schema: envelope(z.object({ checkoutUrl: z.string().url().nullable(), expiresAt: dateTimeSchema.nullable(), order: publicOrderSchema })) } } }, ...publicErrors },
+  });
+  registry.registerPath({
+    method: 'post', path: '/api/v2/webhooks/mercado-pago', tags: ['Payments'],
+    request: { query: z.object({ 'data.id': z.string().min(1).optional(), type: z.enum(['order', 'payment']).optional() }), headers: z.object({ 'x-signature': z.string(), 'x-request-id': z.string() }), body: { required: true, content: { 'application/json': { schema: z.object({ id: z.union([z.string(), z.number()]), type: z.enum(['order', 'payment']), action: z.string().optional(), data: z.object({ id: z.union([z.string(), z.number()]) }) }) } } } },
+    responses: { 200: { description: 'Notification persisted for durable processing', content: { 'application/json': { schema: z.object({ received: z.literal(true) }) } } }, 400: publicErrors[400], 401: publicErrors[401], 503: publicErrors[503] },
   });
   const supportConversationQuery = z.object({
     status: supportStatusSchema.optional(),

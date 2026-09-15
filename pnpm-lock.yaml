@@ -36,8 +36,8 @@ importers:
         specifier: 8.1.0
         version: 8.1.0
       mercadopago:
-        specifier: 3.5.0
-        version: 3.5.0
+        specifier: 3.6.1
+        version: 3.6.1
       multer:
         specifier: 2.2.0
         version: 2.2.0
@@ -1779,8 +1779,8 @@ packages:
     resolution: {integrity: sha512-yz3xRaG20c6/BOzvYoDaGtPmGscs7YivItZEEqe6GbwNfHuxu9YNmvnEkMzKldAGY4/80pRcQRZSEnhquk9XuQ==}
     engines: {node: '>= 0.8'}
 
-  mercadopago@3.5.0:
-    resolution: {integrity: sha512-wOT4PaPFdEsgt+JcIhT+OHynmK8l4yMorg7UgUxiuMi4s9mo8IO0FDIVCExrs5+vs0ZQgH9n9vq10OqYRPimkQ==}
+  mercadopago@3.6.1:
+    resolution: {integrity: sha512-JFgKCSRHMxkS1p12VMIcpI/Zki739J+5lbpl7PB0O8WHaFl4SFKQnm9paX/gqBQeh211Ozc498D49Fbe3U1jEw==}
     engines: {node: '>=18'}
 
   merge-descriptors@2.0.0:
@@ -3926,7 +3926,7 @@ snapshots:
 
   media-typer@1.1.1: {}
 
-  mercadopago@3.5.0: {}
+  mercadopago@3.6.1: {}
 
   merge-descriptors@2.0.0: {}
 

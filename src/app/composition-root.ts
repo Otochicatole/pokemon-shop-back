@@ -18,7 +18,7 @@ import { createLoyaltyRouter } from '../modules/loyalty/index.js';
 import { createSupportRouters, SupportRealtimeHub } from '../modules/support/index.js';
 import { createNotificationsRouters } from '../modules/notifications/index.js';
 import { PrismaUnitOfWork } from '../shared/infrastructure/prisma-unit-of-work.js';
-import { getTransferSettings, transferSettingsConfigured } from '../modules/payments/index.js';
+import { createMercadoPagoGateway, getTransferSettings, transferSettingsConfigured, type MercadoPagoGateway } from '../modules/payments/index.js';
 import { createNewsRouter } from '../modules/news/index.js';
 import { createAffiliateRouter, createAdminAffiliateRouter } from '../modules/affiliates/index.js';
 
@@ -29,6 +29,7 @@ export interface CompositionRoot {
   upload: multer.Multer;
   applications: { backoffice: AdminCmsApplication; retiredImageCleanup: CleanupRetiredProductImages };
   realtime: { support: SupportRealtimeHub };
+  payments: { mercadoPago: MercadoPagoGateway | null };
   routers: {
     customerAccess: ReturnType<typeof createAuthRouter>;
     adminAccess: ReturnType<typeof createAdminAuthRouter>;
@@ -54,11 +55,12 @@ export function createCompositionRoot(): CompositionRoot {
     limits: { fileSize: 10 * 1024 * 1024, files: 8, fields: 20, parts: 30, fieldNameSize: 100, fieldSize: 100_000 },
   });
   const supportRealtime = new SupportRealtimeHub();
+  const mercadoPago = createMercadoPagoGateway();
   const backofficeRepositories = createPrismaAdminCmsRepositories(prisma, writeCoordinator, supportRealtime);
   const backofficeApplication = createAdminCmsApplication(backofficeRepositories, {
     integrations: async () => ({
       bankTransfer: transferSettingsConfigured(await getTransferSettings(prisma)),
-      mercadoPago: Boolean(env.MERCADOPAGO_ACCESS_TOKEN),
+      mercadoPago: Boolean(mercadoPago),
       smtp: Boolean(env.SMTP_HOST),
     }),
   });
@@ -91,6 +93,7 @@ export function createCompositionRoot(): CompositionRoot {
     upload,
     applications: { backoffice: backofficeApplication, retiredImageCleanup },
     realtime: { support: supportRealtime },
+    payments: { mercadoPago },
     routers: {
       customerAccess: createAuthRouter(prisma, { onSessionRevoked }),
       adminAccess: createAdminAuthRouter(prisma, { onSessionRevoked }),
@@ -98,7 +101,7 @@ export function createCompositionRoot(): CompositionRoot {
       news: createNewsRouter(prisma),
       affiliate: createAffiliateRouter(prisma, upload, (file) => saveImage(prisma, file, 'PUBLIC', 'products'), (id) => discardUnattachedFile(prisma, id), supportRealtime),
       adminAffiliate: createAdminAffiliateRouter(prisma, supportRealtime),
-      commerce: createOrdersRouter(prisma, upload, supportRealtime),
+      commerce: createOrdersRouter(prisma, upload, supportRealtime, mercadoPago),
       loyalty: createLoyaltyRouter(prisma),
       support: supportRouters.userRouter,
       adminSupport: supportRouters.adminRouter,

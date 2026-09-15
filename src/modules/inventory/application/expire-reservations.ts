@@ -15,7 +15,7 @@ export class ExpireReservations {
   public constructor(private readonly dependencies: ReservationExpiryDependencies) {}
 
   public async execute(now = new Date()): Promise<void> {
-    const orders = await this.dependencies.prisma.order.findMany({ where: { expiresAt: { lt: now }, status: { in: [OrderStatus.PENDING_PAYMENT, OrderStatus.PAYMENT_REVIEW] } }, select: { id: true } });
+    const orders = await this.dependencies.prisma.order.findMany({ where: { expiresAt: { lte: now }, status: { in: [OrderStatus.PENDING_PAYMENT, OrderStatus.PAYMENT_REVIEW] } }, select: { id: true } });
     for (const order of orders) {
       const notificationIds = await this.dependencies.writeCoordinator.run(() => this.dependencies.prisma.$transaction(async (tx) => {
         const current = await tx.order.findUnique({ where: { id: order.id } });

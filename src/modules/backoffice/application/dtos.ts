@@ -51,6 +51,7 @@ export type DashboardDto = {
   orders: { total: number; byStatus: Record<string, number> };
   products: { draft: number; published: number; archived: number; outOfStock: number; lowStock: number };
   attention: { transferReviews: number; mercadoPagoReviews: number };
+  mercadoPagoWebhook: { backlog: number; exhausted: number; lastError: string | null; lastErrorAt: Date | null };
   integrations: { bankTransfer: boolean; mercadoPago: boolean; smtp: boolean };
   recentOrders: Array<{ id: string; number: string; status: OrderStatusValue; total: MoneyDto; createdAt: Date }>;
   recentActivity: AuditEntryDto[];

@@ -88,6 +88,11 @@ enum PaymentMethod {
   MERCADO_PAGO
 }
 
+enum MercadoPagoIntegrationMode {
+  PREFERENCE_V1
+  ORDER_V1
+}
+
 enum PaymentStatus {
   PENDING
   UNDER_REVIEW
@@ -933,29 +938,86 @@ model TransferReceipt {
 }
 
 model MercadoPagoPayment {
-  id                String    @id @default(uuid())
-  paymentId         String    @unique
-  preferenceId      String?
-  externalPaymentId String?   @unique
-  status            String?
-  statusDetail      String?
-  checkoutUrl       String?
-  expiresAt         DateTime?
-  payment           Payment   @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  id                      String                    @id @default(uuid())
+  paymentId               String                    @unique
+  // Preserve the legacy default for rows created by old Preference-based code.
+  // New Orders API rows set ORDER_V1 explicitly in the application transaction.
+  integrationMode         MercadoPagoIntegrationMode @default(PREFERENCE_V1)
+  preferenceId            String?
+  providerOrderId         String?                   @unique
+  providerIdempotencyKey  String?                   @unique
+  externalPaymentId       String?                   @unique
+  status                  String?
+  statusDetail            String?
+  checkoutUrl             String?
+  providerAmountMinor     BigInt?
+  providerCurrency        String?
+  exchangeRateSnapshotId  String?
+  expiresAt               DateTime?
+  payment                 Payment                 @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  exchangeRateSnapshot    ExchangeRateSnapshot?   @relation(fields: [exchangeRateSnapshotId], references: [id], onDelete: SetNull)
+  attempts                MercadoPagoPaymentAttempt[]
+
+  @@index([providerOrderId])
+  @@index([status, expiresAt])
+}
+
+model ExchangeRateSnapshot {
+  id                String   @id @default(uuid())
+  source            String
+  baseCurrency      String
+  quoteCurrency     String
+  sellRateMicros    BigInt
+  providerUpdatedAt DateTime?
+  fetchedAt         DateTime @default(now())
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+  mercadoPayments   MercadoPagoPayment[]
+
+  @@index([source, baseCurrency, quoteCurrency, fetchedAt])
+  @@index([expiresAt])
+}
+
+model MercadoPagoPaymentAttempt {
+  id                    String              @id @default(uuid())
+  mercadoPagoPaymentId  String
+  providerPaymentId     String?             @unique
+  attemptNumber         Int
+  status                String
+  statusDetail          String?
+  amountMinor           BigInt?
+  refundedAmountMinor   BigInt?
+  currency              String?
+  payload               String?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  mercadoPagoPayment    MercadoPagoPayment  @relation(fields: [mercadoPagoPaymentId], references: [id], onDelete: Cascade)
+
+  @@unique([mercadoPagoPaymentId, attemptNumber])
+  @@index([status, updatedAt])
 }
 
 model WebhookEvent {
-  id          String    @id @default(uuid())
-  provider    String
-  externalKey String
-  paymentId   String?
-  receivedAt  DateTime  @default(now())
-  processedAt DateTime?
-  payload     String
-  payment     Payment?  @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  id                String    @id @default(uuid())
+  provider          String
+  externalKey       String
+  notificationId    String?   @unique
+  resourceId        String?
+  paymentId         String?
+  receivedAt        DateTime  @default(now())
+  processedAt       DateTime?
+  attemptCount      Int       @default(0)
+  nextAttemptAt     DateTime?
+  lockedAt          DateTime?
+  lastError         String?
+  failedAt          DateTime?
+  updatedAt         DateTime  @updatedAt
+  payload           String
+  payment           Payment?  @relation(fields: [paymentId], references: [id], onDelete: SetNull)
 
   @@unique([provider, externalKey])
-  @@index([processedAt])
+  @@index([processedAt, nextAttemptAt])
+  @@index([resourceId, processedAt])
 }
 
 model RefundRecord {

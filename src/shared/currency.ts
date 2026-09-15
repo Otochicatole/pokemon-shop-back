@@ -1,5 +1,8 @@
 export const BASE_CURRENCY = 'USD' as const;
 export type BaseCurrency = typeof BASE_CURRENCY;
+export const PROVIDER_CURRENCY = 'ARS' as const;
+export type ProviderCurrency = typeof PROVIDER_CURRENCY;
+export type Currency = BaseCurrency | ProviderCurrency;
 
 export const LEGACY_ARS_MINOR_PER_USD = 1520n;
 

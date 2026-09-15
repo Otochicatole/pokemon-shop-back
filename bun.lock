@@ -7,13 +7,14 @@
       "dependencies": {
         "@asteasolutions/zod-to-openapi": "9.1.0",
         "@prisma/client": "6.19.3",
+        "@tcgdex/sdk": "^2.9.0",
         "argon2": "0.45.1",
         "cookie-parser": "1.4.7",
         "cors": "2.8.5",
         "dotenv": "17.2.2",
         "express": "5.2.1",
         "helmet": "8.1.0",
-        "mercadopago": "3.5.0",
+        "mercadopago": "3.6.1",
         "multer": "2.2.0",
         "nodemailer": "9.0.5",
         "openid-client": "6.8.7",
@@ -21,6 +22,7 @@
         "pino-http": "10.5.0",
         "sharp": "0.35.4",
         "swagger-ui-express": "5.0.1",
+        "ws": "^8.21.3",
         "zod": "4.4.3",
       },
       "devDependencies": {
@@ -32,6 +34,7 @@
         "@types/nodemailer": "8.0.1",
         "@types/pino-http": "5.8.4",
         "@types/swagger-ui-express": "4.1.8",
+        "@types/ws": "^8.18.1",
         "@typescript-eslint/eslint-plugin": "8.68.0",
         "@typescript-eslint/parser": "8.68.0",
         "@vitest/coverage-v8": "3.2.4",
@@ -59,6 +62,14 @@
     "@babel/types": ["@babel/types@7.29.8", "", { "dependencies": { "@babel/helper-string-parser": "7.29.7", "@babel/helper-validator-identifier": "7.29.7" } }, "sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg=="],
 
     "@bcoe/v8-coverage": ["@bcoe/v8-coverage@1.0.2", "", {}, "sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA=="],
+
+    "@cachex/core": ["@cachex/core@1.0.1", "", { "dependencies": { "@dzeio/object-util": "^1.8.3" } }, "sha512-sHynwjF9hKIvwg8rTUdvA7MOUMcUC5Mq0dpynPBILRS+IPvsHcE4Cb2uRSs0/I2nxO7NQp9p+xHYistdfJJSwg=="],
+
+    "@cachex/memory": ["@cachex/memory@1.0.1", "", { "dependencies": { "@cachex/core": "^1" } }, "sha512-KWUTdCCXhIlAkJaVZMhUh9kD0uq8PxC3Z34Q3lMGZOAV6FXP/cOMW89ALrWX3VkoRrrM4R6MIMO+amZNOvEqgw=="],
+
+    "@cachex/web-storage": ["@cachex/web-storage@1.0.1", "", { "dependencies": { "@cachex/core": "^1" } }, "sha512-E8Xa9qDZgNgr+lcj3eixowg7PH2CVZbp3huuoc5xVVTtwYrZi5YqbHBG12yG3r6C6Fts/2Yoq6cbVBSm6c8VRA=="],
+
+    "@dzeio/object-util": ["@dzeio/object-util@1.9.2", "", {}, "sha512-L3EBaHnDmf/+LAC61eCgWzcGXjbaOoFB4ml3eeOFxKlVlO6IZ2BpdstoqgAfLNKqdy4Ixp7TlP5z4ohdPxfSLg=="],
 
     "@emnapi/runtime": ["@emnapi/runtime@1.11.3", "", { "dependencies": { "tslib": "2.8.1" } }, "sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA=="],
 
@@ -288,6 +299,8 @@
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
+    "@tcgdex/sdk": ["@tcgdex/sdk@2.9.0", "", { "dependencies": { "@cachex/memory": "^1", "@cachex/web-storage": "^1", "@dzeio/object-util": "^1" } }, "sha512-bSX4Bvj3jtxgpEgX/9gW9MOQk64tWozEF1Am1NJd7ruRqpich8wgf6rZkyQsHWy0Gnl7BBNWZCIDe4+izCcwXA=="],
+
     "@types/body-parser": ["@types/body-parser@1.19.6", "", { "dependencies": { "@types/connect": "3.4.38", "@types/node": "24.3.0" } }, "sha512-HLFeCYgz89uk22N5Qg3dvGvsv46B8GLvKKo1zKG4NybA8U2DiEO3w9lqGg29t/tfLRJpJ6iQxnVw4OnB7MoM9g=="],
 
     "@types/chai": ["@types/chai@5.2.3", "", { "dependencies": { "@types/deep-eql": "4.0.2", "assertion-error": "2.0.1" } }, "sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA=="],
@@ -333,6 +346,8 @@
     "@types/serve-static": ["@types/serve-static@2.2.0", "", { "dependencies": { "@types/http-errors": "2.0.5", "@types/node": "24.3.0" } }, "sha512-8mam4H1NHLtu7nmtalF7eyBH14QyOASmcxHhSfEoRyr0nP/YdoesEtU+uSRvMe96TW/HPTtkoKqQLl53N7UXMQ=="],
 
     "@types/swagger-ui-express": ["@types/swagger-ui-express@4.1.8", "", { "dependencies": { "@types/express": "5.0.3", "@types/serve-static": "2.2.0" } }, "sha512-AhZV8/EIreHFmBV5wAs0gzJUNq9JbbSXgJLQubCC0jtIo6prnI9MIRRxnU4MZX9RB9yXxF1V4R7jtLl/Wcj31g=="],
+
+    "@types/ws": ["@types/ws@8.18.1", "", { "dependencies": { "@types/node": "*" } }, "sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg=="],
 
     "@typescript-eslint/eslint-plugin": ["@typescript-eslint/eslint-plugin@8.68.0", "", { "dependencies": { "@eslint-community/regexpp": "4.12.2", "@typescript-eslint/scope-manager": "8.68.0", "@typescript-eslint/type-utils": "8.68.0", "@typescript-eslint/utils": "8.68.0", "@typescript-eslint/visitor-keys": "8.68.0", "ignore": "7.0.6", "natural-compare": "1.4.0", "ts-api-utils": "2.5.0" }, "peerDependencies": { "@typescript-eslint/parser": "8.68.0", "eslint": "9.35.0", "typescript": "5.9.3" } }, "sha512-WASHDpCm6qO5jj9g1a+8NiW5+GCkAyLReR56/4VruYmNgfUmqpxOfZ2Yfb8xGfJPWv5Qi6LSD8sXdces3vbp/Q=="],
 
@@ -692,7 +707,7 @@
 
     "media-typer": ["media-typer@1.1.1", "", {}, "sha512-yz3xRaG20c6/BOzvYoDaGtPmGscs7YivItZEEqe6GbwNfHuxu9YNmvnEkMzKldAGY4/80pRcQRZSEnhquk9XuQ=="],
 
-    "mercadopago": ["mercadopago@3.5.0", "", {}, "sha512-wOT4PaPFdEsgt+JcIhT+OHynmK8l4yMorg7UgUxiuMi4s9mo8IO0FDIVCExrs5+vs0ZQgH9n9vq10OqYRPimkQ=="],
+    "mercadopago": ["mercadopago@3.6.1", "", {}, "sha512-JFgKCSRHMxkS1p12VMIcpI/Zki739J+5lbpl7PB0O8WHaFl4SFKQnm9paX/gqBQeh211Ozc498D49Fbe3U1jEw=="],
 
     "merge-descriptors": ["merge-descriptors@2.0.0", "", {}, "sha512-Snk314V5ayFLhp3fkUREub6WtjBfPdCPY1Ln8/8munuLuiYhsABgBVWsozAG+MWMbVEvcdcpbi9R7ww22l9Q3g=="],
 
@@ -961,6 +976,8 @@
     "wrap-ansi-cjs": ["wrap-ansi@7.0.0", "", { "dependencies": { "ansi-styles": "4.3.0", "string-width": "4.2.3", "strip-ansi": "6.0.1" } }, "sha512-YVGIj2kamLSTxw6NsZjoBxfSwsn0ycdesmc4p+Q21c5zPuZ1pl+NfxVdxPtdHvmNVOQ6XSYG4AUtyt/Fi7D16Q=="],
 
     "wrappy": ["wrappy@1.0.2", "", {}, "sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ=="],
+
+    "ws": ["ws@8.21.3", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw=="],
 
     "yaml": ["yaml@2.9.0", "", { "bin": { "yaml": "bin.mjs" } }, "sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA=="],
 

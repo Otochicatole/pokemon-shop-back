@@ -9,6 +9,7 @@ import { ExpireReservations } from './modules/inventory/index.js';
 import { attachSupportWebSocketServer, getSupportUnreadCount } from './modules/support/index.js';
 import { getNotificationUnreadCount } from './modules/notifications/index.js';
 import { completeDueSellerOrders } from './modules/affiliates/complete-seller-orders.js';
+import { MercadoPagoWebhookWorker } from './modules/payments/mercado-pago-webhook-worker.js';
 
 const lockPath = path.resolve(env.STORAGE_ROOT, 'app.lock');
 
@@ -56,6 +57,7 @@ async function acquireLock() {
 let expirationRunning: Promise<void> | null = null;
 let mediaCleanupRunning: Promise<void> | null = null;
 let sellerCompletionRunning: Promise<void> | null = null;
+let mercadoPagoWebhookRunning: Promise<void> | null = null;
 
 function expireOrders(): Promise<void> {
   if (expirationRunning) return expirationRunning;
@@ -81,6 +83,13 @@ function completeSellerOrders(): Promise<void> {
   return sellerCompletionRunning;
 }
 
+function processMercadoPagoWebhooks(): Promise<void> {
+  if (!composition.payments.mercadoPago || mercadoPagoWebhookRunning) return mercadoPagoWebhookRunning ?? Promise.resolve();
+  mercadoPagoWebhookRunning = new MercadoPagoWebhookWorker({ prisma, gateway: composition.payments.mercadoPago, realtime: composition.realtime.support }).runOnce()
+    .finally(() => { mercadoPagoWebhookRunning = null; });
+  return mercadoPagoWebhookRunning;
+}
+
 async function main() {
   await ensureStorage();
   const releaseLock = await acquireLock();
@@ -88,9 +97,11 @@ async function main() {
   const expirationTimer = setInterval(() => { void expireOrders().catch((error) => logger.error({ err: error }, 'Order expiry job failed')); }, 60_000);
   const mediaCleanupTimer = setInterval(() => { void cleanupRetiredImages().catch((error) => logger.error({ err: error }, 'Retired product image cleanup failed')); }, 5 * 60_000);
   const sellerCompletionTimer = setInterval(() => { void completeSellerOrders().catch((error) => logger.error({ err: error }, 'Affiliate seller order completion failed')); }, 60_000);
+  const mercadoPagoWebhookTimer = setInterval(() => { void processMercadoPagoWebhooks().catch((error) => logger.error({ err: error }, 'Mercado Pago webhook worker failed')); }, 5_000);
   expirationTimer.unref();
   mediaCleanupTimer.unref();
   sellerCompletionTimer.unref();
+  mercadoPagoWebhookTimer.unref();
   void cleanupRetiredImages().catch((error) => logger.error({ err: error }, 'Initial retired product image cleanup failed'));
   const server = app.listen(env.PORT, () => logger.info({ port: env.PORT }, 'back-card-shop listening'));
   const supportWebSocketServer = attachSupportWebSocketServer(server, {
@@ -105,11 +116,12 @@ async function main() {
     clearInterval(expirationTimer);
     clearInterval(mediaCleanupTimer);
     clearInterval(sellerCompletionTimer);
+    clearInterval(mercadoPagoWebhookTimer);
     await supportWebSocketServer.close();
     await new Promise<void>((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
     });
-    const activeJobs = [expirationRunning, mediaCleanupRunning, sellerCompletionRunning]
+    const activeJobs = [expirationRunning, mediaCleanupRunning, sellerCompletionRunning, mercadoPagoWebhookRunning]
       .filter((job): job is Promise<void> => job !== null);
     await Promise.allSettled(activeJobs);
     await releaseLock();
