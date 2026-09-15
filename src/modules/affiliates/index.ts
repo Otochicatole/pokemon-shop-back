@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { env } from '../../config/env.js';
 import { currentAdmin, currentAffiliate, currentUser, requireAdmin, requireAffiliate } from '../../infrastructure/sessions.js';
 import { badRequest, conflict, forbidden, notFound } from '../../shared/errors.js';
+import { logger } from '../../infrastructure/logger.js';
 import { discardUnattachedFile, saveImage } from '../media/index.js';
 import { BASE_CURRENCY } from '../../shared/currency.js';
 import { affiliateBalance, requestSellerCancellation, refundSellerOrder, resolveAffiliateIssue, resolveCancellation, sellerOrderAllowedActions, transitionSellerOrder } from './affiliate-marketplace-service.js';
@@ -174,6 +175,8 @@ export function createAffiliateRouter(prisma: PrismaClient, upload: { array(fiel
     const listing = await prisma.affiliateListing.findFirst({ where: { id: String(req.params.id), affiliateId: affiliate.id }, include: { product: { include: { inventory: true } } } });
     if (!listing) throw notFound('Affiliate listing not found');
     if (listing.product.status === ProductStatus.ARCHIVED) throw conflict('LISTING_ARCHIVED', 'Archived listings cannot be edited');
+    const automaticallySubmitted = listing.status === AffiliateListingStatus.APPROVED;
+    const nextListingStatus = automaticallySubmitted ? AffiliateListingStatus.PENDING_REVIEW : AffiliateListingStatus.DRAFT;
     const data: Prisma.ProductUpdateInput = {
       ...(input.name !== undefined ? { name: input.name } : {}), ...(input.description !== undefined ? { description: input.description } : {}),
       ...(input.kind !== undefined ? { kind: input.kind } : {}), ...(input.stockMode !== undefined ? { stockMode: input.stockMode } : {}), ...(input.priceMinor !== undefined ? { priceMinor: input.priceMinor } : {}),
@@ -193,10 +196,18 @@ export function createAffiliateRouter(prisma: PrismaClient, upload: { array(fiel
         if (input.pokemonCard) await tx.pokemonCardDetails.create({ data: { productId: listing.productId, ...input.pokemonCard } });
       }
       await tx.product.update({ where: { id: listing.productId }, data: { status: ProductStatus.DRAFT, publishedAt: null } });
-      await tx.affiliateListing.update({ where: { id: listing.id }, data: { status: AffiliateListingStatus.DRAFT, reviewNote: null, submittedAt: null, reviewedAt: null, reviewedById: null } });
+      await tx.affiliateListing.update({ where: { id: listing.id }, data: { status: nextListingStatus, reviewNote: null, submittedAt: automaticallySubmitted ? new Date() : null, reviewedAt: null, reviewedById: null } });
       await tx.auditLog.create({ data: auditData('USER', affiliate.userId, 'AFFILIATE_LISTING_UPDATED', 'AffiliateListing', listing.id, { fromVersion: input.expectedVersion, toVersion: input.expectedVersion + 1 }) });
     });
-    return res.json({ id: listing.id, version: input.expectedVersion + 1 });
+    if (automaticallySubmitted) {
+      try {
+        const notices = await createAffiliateListingNotification(prisma, {}, { id: listing.id, productName: listing.product.name }, NotificationType.AFFILIATE_LISTING_SUBMITTED, 'Nueva publicación para revisar', `La publicación ${listing.product.name} espera revisión.`, `${input.expectedVersion + 1}`);
+        if (realtime) await publishNotifications(prisma, realtime, notices.map((notice) => notice.id));
+      } catch (error) {
+        logger.error({ err: error, listingId: listing.id }, 'Affiliate listing resubmission notification failed after commit');
+      }
+    }
+    return res.json({ id: listing.id, version: input.expectedVersion + 1, status: nextListingStatus });
   });
   router.post('/listings/:id/submit', async (req, res) => {
     const affiliate = activeAffiliateOrThrow(req);
@@ -204,11 +215,19 @@ export function createAffiliateRouter(prisma: PrismaClient, upload: { array(fiel
     if (!listing) throw notFound('Affiliate listing not found');
     const logistics = await prisma.$transaction(async (tx) => ({ zones: await tx.shippingZone.count({ where: { affiliateId: affiliate.id, active: true } }), pickups: await tx.pickupPoint.count({ where: { affiliateId: affiliate.id, active: true } }) }));
     if (!listing.product.inventory || listing.product.inventory.onHand <= 0 || listing.product.images.length === 0 || (logistics.zones === 0 && logistics.pickups === 0)) throw badRequest('LISTING_INCOMPLETE', 'A listing requires valid inventory, at least one image and an active delivery option');
-    const changed = await prisma.affiliateListing.updateMany({ where: { id: listing.id, status: { in: [AffiliateListingStatus.DRAFT, AffiliateListingStatus.CHANGES_REQUESTED, AffiliateListingStatus.REJECTED] } }, data: { status: AffiliateListingStatus.PENDING_REVIEW, submittedAt: new Date(), reviewNote: null } });
-    if (changed.count !== 1) throw conflict('LISTING_REVIEW_STATE', 'The listing cannot be submitted from its current state');
-    await prisma.auditLog.create({ data: auditData('USER', affiliate.userId, 'AFFILIATE_LISTING_SUBMITTED', 'AffiliateListing', listing.id) });
-    const notices = await prisma.$transaction((tx) => createAffiliateListingNotification(tx, {}, { id: listing.id, productName: listing.product.name }, NotificationType.AFFILIATE_LISTING_SUBMITTED, 'Nueva publicación para revisar', `La publicación ${listing.product.name} espera revisión.`, `${listing.product.version}`));
-    if (realtime) await publishNotifications(prisma, realtime, notices.map((notice) => notice.id));
+    await prisma.$transaction(async (tx) => {
+      const changed = await tx.affiliateListing.updateMany({ where: { id: listing.id, status: { in: [AffiliateListingStatus.DRAFT, AffiliateListingStatus.CHANGES_REQUESTED, AffiliateListingStatus.REJECTED] } }, data: { status: AffiliateListingStatus.PENDING_REVIEW, submittedAt: new Date(), reviewNote: null } });
+      if (changed.count !== 1) throw conflict('LISTING_REVIEW_STATE', 'The listing cannot be submitted from its current state');
+      await tx.auditLog.create({ data: auditData('USER', affiliate.userId, 'AFFILIATE_LISTING_SUBMITTED', 'AffiliateListing', listing.id) });
+    });
+    // El estado ya quedó confirmado. La notificación es posterior al commit y
+    // no debe hacer que una publicación enviada correctamente responda 500.
+    try {
+      const notices = await prisma.$transaction((tx) => createAffiliateListingNotification(tx, {}, { id: listing.id, productName: listing.product.name }, NotificationType.AFFILIATE_LISTING_SUBMITTED, 'Nueva publicación para revisar', `La publicación ${listing.product.name} espera revisión.`, `${listing.product.version}`));
+      if (realtime) await publishNotifications(prisma, realtime, notices.map((notice) => notice.id));
+    } catch (error) {
+      logger.error({ err: error, listingId: listing.id }, 'Affiliate listing submission notification failed after commit');
+    }
     return res.json({ id: listing.id, status: AffiliateListingStatus.PENDING_REVIEW });
   });
   router.post('/listings/:id/archive', async (req, res) => {
@@ -480,8 +499,15 @@ export function createAdminAffiliateRouter(prisma: PrismaClient, realtime?: Supp
       await tx.product.update({ where: { id: listing.productId }, data: { status: productStatus, publishedAt: productStatus === ProductStatus.PUBLISHED ? new Date() : null, version: { increment: 1 } } });
       await tx.auditLog.create({ data: auditData('ADMIN', admin.adminId, `AFFILIATE_LISTING_${input.decision}`, 'AffiliateListing', listing.id, { productId: listing.productId, note: input.note }) });
     });
-    const notices = await createAffiliateListingNotification(prisma, { userId: listing.affiliate.userId }, { id: listing.id, productName: listing.product.name }, NotificationType.AFFILIATE_LISTING_REVIEWED, 'Tu publicación fue revisada', `La publicación ${listing.product.name} fue marcada como ${input.decision.toLowerCase()}.`, `review:${input.decision}:${input.expectedVersion}`);
-    if (realtime) await publishNotifications(prisma, realtime, notices.map((notice) => notice.id));
+    // La revisión ya fue confirmada dentro de la transacción. Las notificaciones
+    // se ejecutan después del commit y no deben convertir una aprobación válida
+    // en un error 500 si falla el canal de avisos o su persistencia.
+    try {
+      const notices = await createAffiliateListingNotification(prisma, { userId: listing.affiliate.userId }, { id: listing.id, productName: listing.product.name }, NotificationType.AFFILIATE_LISTING_REVIEWED, 'Tu publicación fue revisada', `La publicación ${listing.product.name} fue marcada como ${input.decision.toLowerCase()}.`, `review:${input.decision}:${input.expectedVersion}`);
+      if (realtime) await publishNotifications(prisma, realtime, notices.map((notice) => notice.id));
+    } catch (error) {
+      logger.error({ err: error, listingId: listing.id, decision: input.decision }, 'Affiliate listing review notification failed after commit');
+    }
     return res.json({ id: listing.id, status: input.decision, productStatus, version: input.expectedVersion + 1 });
   });
   router.get('/payouts', async (req, res) => {
