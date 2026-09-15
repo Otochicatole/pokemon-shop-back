@@ -104,6 +104,7 @@ export function registerAdminCmsPaths(registry: OpenAPIRegistry, { problemSchema
   for (const action of ['publish', 'archive'] as const) {
     registry.registerPath({ method: 'post', path: `/api/v2/admin/products/{id}/${action}`, tags: ['Admin products'], summary: `${action === 'publish' ? 'Publish' : 'Archive'} a product using optimistic concurrency`, security, request: { params: idParamsSchema, headers: csrf, body: json(expectedVersionSchema) }, responses: ok(`Product ${action === 'publish' ? 'published' : 'archived'}`, adminProductStatusDataSchema) });
   }
+  registry.registerPath({ method: 'delete', path: '/api/v2/admin/products/{id}', tags: ['Admin products'], summary: 'Permanently delete an archived product without order history', security, request: { params: idParamsSchema, headers: csrf, body: json(expectedVersionSchema) }, responses: { 204: { description: 'Archived product deleted' }, ...errors } });
   registry.registerPath({
     method: 'post', path: '/api/v2/admin/products/{id}/images', tags: ['Admin products'], summary: 'Upload up to eight active product images', security,
     request: { params: idParamsSchema, headers: csrf, body: { required: true, content: { 'multipart/form-data': { schema: imageUploadFieldsSchema.extend({ images: z.array(z.string().openapi({ format: 'binary' })).min(1).max(8) }) } } } },

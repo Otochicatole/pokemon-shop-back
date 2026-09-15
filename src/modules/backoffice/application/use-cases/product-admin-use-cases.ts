@@ -11,6 +11,9 @@ export class ProductAdminUseCases {
   changeStatus(actor: AdminActor, id: string, expectedVersion: number, status: 'PUBLISHED' | 'ARCHIVED') {
     return this.products.setProductStatus(actor, id, expectedVersion, status);
   }
+  delete(actor: AdminActor, id: string, expectedVersion: number) {
+    return this.products.deleteProduct(actor, id, expectedVersion);
+  }
   addImages(actor: AdminActor, id: string, expectedVersion: number, files: readonly { id: string; altText?: string }[], options?: { prepend?: boolean }) {
     return this.products.addProductImages(actor, id, expectedVersion, files, options);
   }

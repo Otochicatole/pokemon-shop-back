@@ -8,6 +8,7 @@ export class ProductAdminRepositoryAdapter implements ProductAdminRepository {
   createProduct(actor: AdminActor, input: ProductWrite) { return this.source.createProduct(actor, input); }
   updateProduct(actor: AdminActor, id: string, input: ProductPatch) { return this.source.updateProduct(actor, id, input); }
   setProductStatus(actor: AdminActor, id: string, expectedVersion: number, status: 'PUBLISHED' | 'ARCHIVED') { return this.source.setProductStatus(actor, id, expectedVersion, status); }
+  deleteProduct(actor: AdminActor, id: string, expectedVersion: number) { return this.source.deleteProduct(actor, id, expectedVersion); }
   addProductImages(actor: AdminActor, productId: string, expectedVersion: number, files: readonly { id: string; altText?: string }[], options?: { prepend?: boolean }) { return this.source.addProductImages(actor, productId, expectedVersion, files, options); }
   updateProductImage(actor: AdminActor, productId: string, imageId: string, expectedVersion: number, altText: string | null) { return this.source.updateProductImage(actor, productId, imageId, expectedVersion, altText); }
   reorderProductImages(actor: AdminActor, productId: string, expectedVersion: number, imageIds: readonly string[]) { return this.source.reorderProductImages(actor, productId, expectedVersion, imageIds); }

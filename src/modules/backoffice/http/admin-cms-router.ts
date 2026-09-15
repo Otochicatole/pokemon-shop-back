@@ -83,6 +83,10 @@ export function createAdminCmsRouter({ application, upload, requireAdmin, actorF
   router.patch('/products/:id', async (req, res) => res.json(await application.products.update(actorFromRequest(req), idParamsSchema.parse(req.params).id, productPatchSchema.parse(req.body))));
   router.post('/products/:id/publish', async (req, res) => res.json(await application.products.changeStatus(actorFromRequest(req), idParamsSchema.parse(req.params).id, expectedVersionSchema.parse(req.body).expectedVersion, 'PUBLISHED')));
   router.post('/products/:id/archive', async (req, res) => res.json(await application.products.changeStatus(actorFromRequest(req), idParamsSchema.parse(req.params).id, expectedVersionSchema.parse(req.body).expectedVersion, 'ARCHIVED')));
+  router.delete('/products/:id', async (req, res) => {
+    await application.products.delete(actorFromRequest(req), idParamsSchema.parse(req.params).id, expectedVersionSchema.parse(req.body).expectedVersion);
+    return noContent(res);
+  });
   router.post('/products/:id/images', upload.array('images', 8), async (req: Request, res) => {
     const productId = idParamsSchema.parse(req.params).id;
     const files = (req.files as Express.Multer.File[] | undefined) ?? [];

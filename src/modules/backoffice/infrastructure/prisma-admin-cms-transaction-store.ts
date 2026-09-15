@@ -311,6 +311,32 @@ export class PrismaAdminCmsTransactionStore {
     }));
   }
 
+  async deleteProduct(actor: AdminActor, id: string, expectedVersion: number): Promise<void> {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const existing = await tx.product.findUnique({
+        where: { id },
+        select: {
+          status: true,
+          inventory: { select: { reserved: true } },
+          orderItems: { select: { id: true }, take: 1 },
+          reservations: { where: { releasedAt: null, consumedAt: null }, select: { id: true }, take: 1 },
+          images: { select: { file: { select: { id: true, storageKey: true } } } },
+        },
+      });
+      if (!existing) throw notFound('Product not found');
+      if (existing.status !== 'ARCHIVED') throw conflict('PRODUCT_NOT_ARCHIVED', 'Only archived products can be deleted');
+      if ((existing.inventory?.reserved ?? 0) > 0 || existing.reservations.length > 0) throw conflict('INVENTORY_RESERVED', 'Products with reserved units cannot be deleted');
+      if (existing.orderItems.length > 0) throw conflict('PRODUCT_HAS_ORDERS', 'Products referenced by orders cannot be deleted');
+
+      for (const image of existing.images) await scheduleFileCleanup(tx, image.file);
+      await tx.inventoryReservation.deleteMany({ where: { productId: id } });
+      await tx.inventoryAdjustment.deleteMany({ where: { productId: id } });
+      const deleted = await tx.product.deleteMany({ where: { id, status: 'ARCHIVED', version: expectedVersion } });
+      if (deleted.count !== 1) throw conflict('PRODUCT_CHANGED', 'Product was modified by another administrator');
+      await tx.auditLog.create({ data: auditData(actor, 'PRODUCT_DELETED', 'Product', id, { fromVersion: expectedVersion }) });
+    }));
+  }
+
   addProductImages(actor: AdminActor, productId: string, expectedVersion: number, files: readonly { id: string; altText?: string }[], options?: { prepend?: boolean }) {
     return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
       const version = await incrementProductVersion(tx, productId, expectedVersion);
