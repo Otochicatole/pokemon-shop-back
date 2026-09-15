@@ -15,6 +15,7 @@ import type { SupportRealtimeHub } from '../../support/support-realtime.js';
 import { createOrderStatusNotification, publishNotifications } from '../../notifications/index.js';
 import { getTransferSettings as readTransferSettings, mapTransferSettings, transferSettingsConfigured } from '../../payments/index.js';
 import { settleSellerOrdersOnPayment } from '../../orders/index.js';
+import { closeAndReverseAffiliateSellerOrdersOnParentRefund, closeUnpaidSellerOrders } from '../../affiliates/affiliate-marketplace-service.js';
 
 type Coordinator = { run<T>(operation: () => Promise<T>): Promise<T> };
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -114,13 +115,15 @@ const orderDetailInclude = {
   statusHistory: { orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }] },
   transferReceipts: { orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }] },
   payment: { include: { transfer: true, mercadoPago: true, refunds: true } },
+  sellerOrders: { include: { items: true, statusHistory: { orderBy: [{ createdAt: 'asc' as const }, { id: 'asc' as const }] }, issues: true } },
 } satisfies Prisma.OrderInclude;
 type OrderRecord = Prisma.OrderGetPayload<{ include: typeof orderDetailInclude }>;
 
 function actionsFor(order: OrderRecord) {
   const actions: string[] = [];
-  const next = allowedOrderTransitions[order.status];
+  const next = order.sellerOrders.length ? [] : allowedOrderTransitions[order.status];
   if (next.length) actions.push(...next.map((status) => `TRANSITION_${status}`));
+  if (order.sellerOrders.length) actions.push('VIEW_SELLER_ORDERS');
   if (rollbackTarget(order)) actions.push('ROLLBACK');
   if (['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(order.status)) actions.push('CANCEL');
   if (order.paymentMethod === 'BANK_TRANSFER' && ['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(order.status) && order.transferReceipts.some((receipt) => receipt.review === 'PENDING')) actions.push('REVIEW_TRANSFER');
@@ -167,6 +170,7 @@ function mapOrder(value: OrderRecord): OrderDto {
       addressLine2: value.addressLine2, city: value.city, province: value.province, postalCode: value.postalCode,
     } : { type: 'PICKUP', pickupPointId: value.pickupPointId, name: value.pickupPointName, address: value.pickupPointAddress },
     items: value.items.map((item) => ({ id: item.id, productId: item.productId, sku: item.sku, name: item.productName, imageFileId: item.imageFileId, imageUrl: item.imageFileId ? `/media/public/${item.imageFileId}` : null, unitPrice: money(item.unitPriceMinor), quantity: item.quantity, lineTotal: money(item.lineTotalMinor), snapshot: parseJson(item.productSnapshot) })),
+    sellerOrders: value.sellerOrders.map((sellerOrder) => ({ id: sellerOrder.id, number: sellerOrder.number, sellerType: sellerOrder.sellerType, affiliateId: sellerOrder.affiliateId, sellerName: sellerOrder.sellerName, status: sellerOrder.status, version: sellerOrder.version, subtotal: money(sellerOrder.subtotalMinor), shipping: money(sellerOrder.shippingMinor), commission: money(sellerOrder.commissionMinor), sellerNet: money(sellerOrder.sellerNetMinor), fulfillmentType: sellerOrder.fulfillmentType, items: sellerOrder.items.map((item) => ({ id: item.id, productId: item.productId, name: item.productName, quantity: item.quantity, unitPrice: money(item.unitPriceMinor), lineTotal: money(item.lineTotalMinor) })), timeline: sellerOrder.statusHistory, issues: sellerOrder.issues.map((issue) => ({ id: issue.id, status: issue.status, reason: issue.reason, createdAt: issue.createdAt })) })),
     reservations: value.reservations.map((reservation) => ({ id: reservation.id, productId: reservation.productId, quantity: reservation.quantity, expiresAt: reservation.expiresAt, releasedAt: reservation.releasedAt, consumedAt: reservation.consumedAt })),
     payment: value.payment ? {
       id: value.payment.id, method: value.payment.method, status: value.payment.status, amount: money(value.payment.amountMinor), providerReference: value.payment.providerReference,
@@ -541,6 +545,7 @@ export class PrismaAdminCmsTransactionStore {
       if (!order) throw notFound('Order not found');
       if (!['PENDING_PAYMENT', 'PAYMENT_REVIEW'].includes(order.status)) throw conflict('ORDER_NOT_CANCELLABLE', 'Order cannot be cancelled');
       await updateOrderVersion(tx, order.id, expectedVersion, { status: 'CANCELLED' });
+      await closeUnpaidSellerOrders(tx, order.id, 'CANCELLED', 'Parent order cancelled before payment');
       await releaseReservations(tx, order.id);
       await releaseOrderLoyaltyReservation(tx, order.id);
       const history = await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'CANCELLED', note: note ?? 'Cancelled by administrator', changedById: actor.adminId } });
@@ -557,6 +562,7 @@ export class PrismaAdminCmsTransactionStore {
       const outcome = await this.prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { number }, include: { statusHistory: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] } } });
       if (!order) throw notFound('Order not found');
+      if (await tx.sellerOrder.count({ where: { orderId: order.id } })) throw conflict('PARENT_ORDER_CHILDREN', 'Operate seller orders individually when this order has suborders');
       const isRollback = rollbackTarget(order) === status;
       if (!allowedOrderTransitions[order.status].includes(status) && !isRollback) throw conflict('INVALID_ORDER_TRANSITION', `Order cannot transition from ${order.status} to ${status}`);
       if (status === 'READY_FOR_PICKUP' && order.fulfillmentType !== 'PICKUP') throw conflict('INVALID_FULFILLMENT_TRANSITION', 'Only pickup orders can become ready for pickup');
@@ -591,7 +597,7 @@ export class PrismaAdminCmsTransactionStore {
         const history = await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'PAID', note: note ?? 'Transfer approved', changedById: actor.adminId } });
         notificationIds.push((await createOrderStatusNotification(tx, order, history)).id);
         await settleOrderLoyalty(tx, order.id);
-        await settleSellerOrdersOnPayment(tx, order.id);
+        notificationIds.push(...await settleSellerOrdersOnPayment(tx, order.id));
       } else {
         await updateOrderVersion(tx, order.id, expectedVersion, { status: 'CANCELLED' });
         await releaseReservations(tx, order.id);
@@ -609,6 +615,7 @@ export class PrismaAdminCmsTransactionStore {
         });
         const history = await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'CANCELLED', note: note ?? 'Transfer rejected', changedById: actor.adminId } });
         notificationIds.push((await createOrderStatusNotification(tx, order, history)).id);
+        await closeUnpaidSellerOrders(tx, order.id, 'CANCELLED', 'Transfer rejected before payment');
         await releaseOrderLoyaltyReservation(tx, order.id);
       }
       await tx.auditLog.create({ data: auditData(actor, `TRANSFER_${decision}`, 'TransferReceipt', receiptId, { orderId: order.id, number }) });
@@ -638,9 +645,9 @@ export class PrismaAdminCmsTransactionStore {
       await updateOrderVersion(tx, order.id, expectedVersion, { status: 'PAID' });
       const history = await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'PAID', note: 'Late payment manually accepted after stock validation', changedById: actor.adminId } });
       await settleOrderLoyalty(tx, order.id);
-      await settleSellerOrdersOnPayment(tx, order.id);
+      const sellerNotificationIds = await settleSellerOrdersOnPayment(tx, order.id);
       await tx.auditLog.create({ data: auditData(actor, 'LATE_PAYMENT_FULFILLED', 'Order', order.id, { number }) });
-      return { result: { number, status: 'PAID', version: expectedVersion + 1 } as OrderStatusMutationDto, notificationIds: [(await createOrderStatusNotification(tx, order, history)).id] };
+      return { result: { number, status: 'PAID', version: expectedVersion + 1 } as OrderStatusMutationDto, notificationIds: [(await createOrderStatusNotification(tx, order, history)).id, ...sellerNotificationIds] };
       });
       if (this.realtime && outcome.notificationIds.length) await publishNotifications(this.prisma, this.realtime, outcome.notificationIds);
       return outcome.result;
@@ -658,6 +665,7 @@ export class PrismaAdminCmsTransactionStore {
       await updateOrderVersion(tx, order.id, expectedVersion, { status: 'REFUND_RECORDED' });
       const history = await tx.orderStatusHistory.create({ data: { orderId: order.id, fromStatus: order.status, toStatus: 'REFUND_RECORDED', note: `Full refund recorded: ${reason}`, changedById: actor.adminId } });
       await reverseOrderLoyalty(tx, order.id);
+      await closeAndReverseAffiliateSellerOrdersOnParentRefund(tx, order.id, actor.adminId, `Parent refund ${refund.id}`);
       await tx.auditLog.create({ data: auditData(actor, 'FULL_REFUND_RECORDED', 'Order', order.id, { number, refundId: refund.id, externalReference }) });
       return { result: { refundId: refund.id, number, status: 'REFUND_RECORDED', amount: money(refund.amountMinor, BASE_CURRENCY), version: expectedVersion + 1 } as RefundDto, notificationIds: [(await createOrderStatusNotification(tx, order, history)).id] };
       });

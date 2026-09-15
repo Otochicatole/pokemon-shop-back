@@ -3,7 +3,7 @@ export const productKinds = ['SINGLE_CARD', 'SEALED_PRODUCT', 'ACCESSORY'] as co
 export const stockModes = ['UNIQUE', 'QUANTITY'] as const;
 export const pokemonTypes = ['COLORLESS', 'DARKNESS', 'DRAGON', 'FAIRY', 'FIGHTING', 'FIRE', 'GRASS', 'LIGHTNING', 'METAL', 'PSYCHIC', 'WATER'] as const;
 export const productConditions = ['NM', 'EXCELLENT', 'GOOD', 'PLAYED', 'DAMAGED'] as const;
-export const orderStatuses = ['PENDING_PAYMENT', 'PAYMENT_REVIEW', 'PAID', 'PREPARING', 'READY_FOR_PICKUP', 'SHIPPED', 'COMPLETED', 'CANCELLED', 'EXPIRED', 'REFUND_RECORDED', 'PAYMENT_REQUIRES_REVIEW'] as const;
+export const orderStatuses = ['PENDING_PAYMENT', 'PAYMENT_REVIEW', 'PAID', 'IN_FULFILLMENT', 'PREPARING', 'READY_FOR_PICKUP', 'SHIPPED', 'PARTIALLY_COMPLETED', 'ACTION_REQUIRED', 'COMPLETED', 'CANCELLED', 'EXPIRED', 'REFUND_RECORDED', 'PAYMENT_REQUIRES_REVIEW'] as const;
 export const paymentMethods = ['BANK_TRANSFER', 'MERCADO_PAGO'] as const;
 export const paymentStatuses = ['PENDING', 'UNDER_REVIEW', 'APPROVED', 'PARTIALLY_REFUNDED', 'REJECTED', 'FAILED', 'REFUNDED', 'DISPUTED', 'REQUIRES_REVIEW'] as const;
 
@@ -115,9 +115,9 @@ export type NewsListQuery = CursorPage & { search?: string; active?: boolean };
 
 export const allowedOrderTransitions: Readonly<Record<OrderStatusValue, readonly OrderStatusValue[]>> = {
   PENDING_PAYMENT: [], PAYMENT_REVIEW: [],
-  PAID: ['PREPARING'],
+  PAID: ['PREPARING'], IN_FULFILLMENT: [],
   PREPARING: ['READY_FOR_PICKUP', 'SHIPPED'],
   READY_FOR_PICKUP: ['COMPLETED'],
   SHIPPED: ['COMPLETED'],
-  COMPLETED: [], CANCELLED: [], EXPIRED: [], REFUND_RECORDED: [], PAYMENT_REQUIRES_REVIEW: [],
+  PARTIALLY_COMPLETED: [], ACTION_REQUIRED: [], COMPLETED: [], CANCELLED: [], EXPIRED: [], REFUND_RECORDED: [], PAYMENT_REQUIRES_REVIEW: [],
 };

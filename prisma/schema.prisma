@@ -70,9 +70,12 @@ enum OrderStatus {
   PENDING_PAYMENT
   PAYMENT_REVIEW
   PAID
+  IN_FULFILLMENT
   PREPARING
   READY_FOR_PICKUP
   SHIPPED
+  PARTIALLY_COMPLETED
+  ACTION_REQUIRED
   COMPLETED
   CANCELLED
   EXPIRED
@@ -168,6 +171,8 @@ enum NotificationType {
   AFFILIATE_ORDER_CREATED
   AFFILIATE_ORDER_STATUS_CHANGED
   AFFILIATE_ISSUE_OPENED
+  AFFILIATE_CANCELLATION_REQUESTED
+  AFFILIATE_CANCELLATION_UPDATED
   AFFILIATE_PAYOUT_REQUESTED
   AFFILIATE_PAYOUT_UPDATED
 }
@@ -230,8 +235,17 @@ enum AffiliatePayoutStatus {
 
 enum AffiliateIssueStatus {
   OPEN
+  RESOLVED_CONTINUED
   RESOLVED_COMPLETED
+  RESOLVED_PARTIAL_REFUND
+  RESOLVED_FULL_REFUND
   RESOLVED_REFUNDED
+}
+
+enum AffiliateCancellationStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
 }
 
 model User {
@@ -323,6 +337,7 @@ model Admin {
   affiliateReviews      AffiliateListing[]  @relation("AffiliateListingReviews")
   affiliatePayouts      AffiliatePayoutRequest[] @relation("AffiliatePayoutProcessors")
   affiliateIssueResolutions AffiliateIssue[] @relation("AffiliateIssueResolutions")
+  affiliateCancellationResolutions AffiliateCancellationRequest[] @relation("AffiliateCancellationResolutions")
   affiliateProgramUpdates AffiliateProgramSettings[]
 }
 
@@ -445,6 +460,7 @@ model Affiliate {
   contactPhone          String?
   payoutAccountCipher   String?
   payoutAccountLast4    String?
+  commissionBpsOverride  Int?
   status                AffiliateStatus       @default(ACTIVE)
   version               Int                   @default(1)
   createdAt             DateTime              @default(now())
@@ -458,6 +474,7 @@ model Affiliate {
   ledgerEntries         AffiliateLedgerEntry[]
   payoutRequests        AffiliatePayoutRequest[]
   issues                AffiliateIssue[]
+  cancellationRequests  AffiliateCancellationRequest[]
   imageUploads          ProductImage[]
   inventoryChanges      InventoryAdjustment[]
 
@@ -468,6 +485,7 @@ model Affiliate {
 model AffiliateProgramSettings {
   id             String   @id @default("default")
   commissionBps  Int      @default(1000)
+  autoCompleteDays Int    @default(7)
   version        Int      @default(1)
   updatedById    String?
   createdAt      DateTime @default(now())
@@ -708,6 +726,7 @@ model OrderItem {
   order           Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   sellerOrder     SellerOrder? @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
   product         Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  refundLines     RefundLine[]
 
   @@index([orderId])
   @@index([imageFileId])
@@ -763,6 +782,8 @@ model SellerOrder {
   city                   String?
   province               String?
   postalCode             String?
+  carrier                String?
+  trackingCode           String?
   autoCompleteAt         DateTime?
   completedAt            DateTime?
   createdAt              DateTime          @default(now())
@@ -774,6 +795,7 @@ model SellerOrder {
   statusHistory          SellerOrderHistory[]
   ledgerEntries          AffiliateLedgerEntry[]
   issues                 AffiliateIssue[]
+  cancellationRequests   AffiliateCancellationRequest[]
   refunds                RefundRecord[]
   notifications          Notification[]
 
@@ -802,11 +824,14 @@ model AffiliateIssue {
   affiliateId     String
   openedByUserId  String
   status          AffiliateIssueStatus @default(OPEN)
+  previousStatus  SellerOrderStatus
+  previousAutoCompleteAt DateTime?
   reason          String
   resolutionNote  String?
   resolvedById    String?
   createdAt       DateTime            @default(now())
   resolvedAt      DateTime?
+  version         Int                 @default(1)
   sellerOrder     SellerOrder         @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
   affiliate       Affiliate           @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
   openedBy        User                @relation(fields: [openedByUserId], references: [id], onDelete: Restrict)
@@ -824,6 +849,7 @@ model AffiliateLedgerEntry {
   bucket        AffiliateLedgerBucket
   type          AffiliateLedgerType
   amountMinor   BigInt
+  dedupeKey     String                @unique @default(uuid())
   note          String?
   createdAt     DateTime                @default(now())
   affiliate     Affiliate               @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
@@ -839,6 +865,8 @@ model AffiliatePayoutRequest {
   id                String                @id @default(uuid())
   affiliateId       String
   amountMinor       BigInt
+  destinationCipher String?
+  destinationLast4  String?
   status            AffiliatePayoutStatus @default(REQUESTED)
   externalReference String?
   note              String?
@@ -936,6 +964,11 @@ model RefundRecord {
   sellerOrderId     String?
   fullRefundKey     String?  @unique
   amountMinor       BigInt
+  subtotalMinor     BigInt?
+  shippingMinor     BigInt?
+  commissionReversedMinor BigInt?
+  sellerDebitMinor  BigInt?
+  restocked         Boolean  @default(false)
   currency          String   @default("USD")
   reason            String
   externalReference String
@@ -944,8 +977,45 @@ model RefundRecord {
   payment           Payment  @relation(fields: [paymentId], references: [id], onDelete: Restrict)
   sellerOrder        SellerOrder? @relation(fields: [sellerOrderId], references: [id], onDelete: SetNull)
   createdBy         Admin    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  refundLines       RefundLine[]
 
   @@index([sellerOrderId, createdAt])
+}
+
+model AffiliateCancellationRequest {
+  id                    String                       @id @default(uuid())
+  sellerOrderId         String
+  affiliateId           String
+  previousStatus        SellerOrderStatus
+  previousAutoCompleteAt DateTime?
+  status                AffiliateCancellationStatus @default(REQUESTED)
+  reason                String
+  resolutionNote        String?
+  resolvedById          String?
+  version               Int                          @default(1)
+  createdAt             DateTime                     @default(now())
+  resolvedAt            DateTime?
+  sellerOrder           SellerOrder                  @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
+  affiliate             Affiliate                    @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  resolvedBy            Admin?                       @relation("AffiliateCancellationResolutions", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([affiliateId, status, createdAt])
+  @@index([sellerOrderId, status])
+}
+
+model RefundLine {
+  id             String       @id @default(uuid())
+  refundRecordId String
+  orderItemId    String
+  quantity       Int
+  amountMinor    BigInt
+  restocked      Boolean      @default(false)
+  refundRecord   RefundRecord @relation(fields: [refundRecordId], references: [id], onDelete: Cascade)
+  orderItem      OrderItem    @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+
+  @@index([refundRecordId])
+  @@index([orderItemId])
 }
 
 model OrderStatusHistory {

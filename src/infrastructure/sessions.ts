@@ -212,7 +212,7 @@ export async function requireAffiliate(request: Request, _response: Response, ne
   resLocals(request).userSession = session;
   if (!session.user.emailVerifiedAt) return next(forbidden('Verify your email before accessing the affiliate portal'));
   const affiliate = await prisma.affiliate.findUnique({ where: { userId: session.userId } });
-  if (!affiliate || affiliate.status !== 'ACTIVE') return next(forbidden('Affiliate access is not active'));
+  if (!affiliate) return next(forbidden('Affiliate access is not active'));
   resLocals(request).affiliate = affiliate;
   return next();
 }

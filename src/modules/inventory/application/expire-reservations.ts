@@ -3,6 +3,7 @@ import { OrderStatus } from '@prisma/client';
 import { releaseOrderLoyaltyReservation } from '../../loyalty/index.js';
 import { createOrderStatusNotification, publishNotifications } from '../../notifications/index.js';
 import type { SupportRealtimeHub } from '../../support/support-realtime.js';
+import { closeUnpaidSellerOrders } from '../../affiliates/affiliate-marketplace-service.js';
 
 export interface ReservationExpiryDependencies {
   prisma: PrismaClient;
@@ -21,6 +22,7 @@ export class ExpireReservations {
         if (!current || (current.status !== OrderStatus.PENDING_PAYMENT && current.status !== OrderStatus.PAYMENT_REVIEW) || !current.expiresAt || current.expiresAt > now) return [] as string[];
         await tx.order.update({ where: { id: current.id }, data: { status: OrderStatus.EXPIRED, version: { increment: 1 } } });
         const history = await tx.orderStatusHistory.create({ data: { orderId: current.id, fromStatus: current.status, toStatus: OrderStatus.EXPIRED, note: 'Payment window expired' } });
+        await closeUnpaidSellerOrders(tx, current.id, 'CANCELLED', 'Parent order expired before payment');
         await releaseReservations(tx, current.id, now);
         await releaseOrderLoyaltyReservation(tx, current.id);
         return [(await createOrderStatusNotification(tx, current, history)).id];

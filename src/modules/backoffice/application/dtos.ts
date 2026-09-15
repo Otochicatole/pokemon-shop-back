@@ -203,6 +203,23 @@ export type OrderDto = {
   expiresAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  sellerOrders: Array<{
+    id: string;
+    number: string;
+    sellerType: 'STORE' | 'AFFILIATE';
+    affiliateId: string | null;
+    sellerName: string;
+    status: string;
+    version: number;
+    subtotal: MoneyDto;
+    shipping: MoneyDto;
+    commission: MoneyDto;
+    sellerNet: MoneyDto;
+    fulfillmentType: 'SHIPMENT' | 'PICKUP';
+    items: Array<{ id: string; productId: string; name: string; quantity: number; unitPrice: MoneyDto; lineTotal: MoneyDto }>;
+    timeline: Array<{ id: string; fromStatus: string | null; toStatus: string; note: string | null; createdAt: Date }>;
+    issues: Array<{ id: string; status: string; reason: string; createdAt: Date }>;
+  }>;
 };
 
 export type OrderDetailDto = { order: OrderDto };

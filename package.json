@@ -21,7 +21,8 @@
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
     "admin:create": "tsx src/cli/create-admin.ts",
-    "media:cleanup": "tsx src/cli/cleanup-retired-images.ts"
+    "media:cleanup": "tsx src/cli/cleanup-retired-images.ts",
+    "affiliate:reconcile": "tsx src/cli/reconcile-affiliates.ts"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "9.1.0",

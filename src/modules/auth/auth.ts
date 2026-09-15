@@ -63,7 +63,7 @@ function issueVerificationEmail(userId: string, to: string) {
   })();
 }
 
-type PublicAffiliate = { id: string; publicName: string };
+type PublicAffiliate = { id: string; publicName: string; status: 'ACTIVE' | 'SUSPENDED' };
 
 function toPublicUser(
   user: { id: string; email: string; name: string | null; emailVerifiedAt: Date | null },
@@ -72,10 +72,21 @@ function toPublicUser(
   return { id: user.id, email: user.email, name: user.name, emailVerified: Boolean(user.emailVerifiedAt), affiliate };
 }
 
-function findActiveAffiliate(prisma: PrismaClient, userId: string) {
+function findAffiliateForSession(prisma: PrismaClient, userId: string) {
   return prisma.affiliate.findFirst({
-    where: { userId, status: 'ACTIVE' },
-    select: { id: true, publicName: true },
+    where: {
+      userId,
+      OR: [
+        { status: 'ACTIVE' },
+        {
+          status: 'SUSPENDED',
+          sellerOrders: {
+            some: { status: { notIn: ['COMPLETED', 'CANCELLED', 'REFUNDED'] } },
+          },
+        },
+      ],
+    },
+    select: { id: true, publicName: true, status: true },
   });
 }
 
@@ -108,7 +119,7 @@ export function createAuthRouter(prisma: PrismaClient, options: AuthRouterOption
     if (!user || !user.passwordHash || !(await verifyPassword(user.passwordHash, input.password))) throw unauthorized('Invalid credentials');
     if (user.status !== 'ACTIVE') throw unauthorized('Invalid credentials');
     const session = await createUserSession(user.id, res, req, options.onSessionRevoked);
-    return res.status(200).json({ user: toPublicUser(user, await findActiveAffiliate(prisma, user.id)), csrfToken: session.csrfToken });
+    return res.status(200).json({ user: toPublicUser(user, await findAffiliateForSession(prisma, user.id)), csrfToken: session.csrfToken });
   });
 
   router.post('/logout', async (req, res) => {
@@ -117,7 +128,7 @@ export function createAuthRouter(prisma: PrismaClient, options: AuthRouterOption
   });
   router.get('/me', requireUser, async (req, res) => {
     const session = currentUser(req)!;
-    return res.json({ user: toPublicUser(session.user, await findActiveAffiliate(prisma, session.userId)) });
+    return res.json({ user: toPublicUser(session.user, await findAffiliateForSession(prisma, session.userId)) });
   });
 
   router.post('/verify-email', async (req, res) => {

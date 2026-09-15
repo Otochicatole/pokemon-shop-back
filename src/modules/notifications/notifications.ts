@@ -16,6 +16,9 @@ const notificationListSchema = z.object({
 
 const notificationInclude = {
   order: { select: { number: true } },
+  sellerOrder: { select: { id: true, order: { select: { number: true } } } },
+  affiliateListing: { select: { id: true, product: { select: { name: true } } } },
+  payoutRequest: { select: { id: true } },
   supportConversation: { select: { id: true } },
 } satisfies Prisma.NotificationInclude;
 
@@ -27,6 +30,9 @@ export type NotificationCreateInput = {
   message: string;
   dedupeKey: string;
   orderId?: string;
+  sellerOrderId?: string;
+  affiliateListingId?: string;
+  payoutRequestId?: string;
   supportConversationId?: string;
 };
 
@@ -46,12 +52,21 @@ export function statusLabel(status: string): string {
     EXPIRED: 'vencida',
     REFUND_RECORDED: 'con reembolso registrado',
     PAYMENT_REQUIRES_REVIEW: 'requiere revisión de pago',
+    IN_FULFILLMENT: 'en preparación',
+    PARTIALLY_COMPLETED: 'parcialmente completada',
+    ACTION_REQUIRED: 'requiere atención',
   } as Record<string, string>)[status] ?? status;
 }
 
 export function mapNotification(row: NotificationRow) {
   const reference = row.order
     ? { kind: 'ORDER' as const, orderNumber: row.order.number }
+    : row.sellerOrder
+      ? { kind: 'SELLER_ORDER' as const, sellerOrderId: row.sellerOrder.id, orderNumber: row.sellerOrder.order.number }
+      : row.affiliateListing
+        ? { kind: 'AFFILIATE_LISTING' as const, listingId: row.affiliateListing.id, productName: row.affiliateListing.product.name }
+        : row.payoutRequest
+          ? { kind: 'AFFILIATE_PAYOUT' as const, payoutId: row.payoutRequest.id }
     : row.supportConversation
       ? { kind: 'SUPPORT_CONVERSATION' as const, conversationId: row.supportConversation.id }
       : null;
@@ -67,7 +82,8 @@ export function mapNotification(row: NotificationRow) {
 }
 
 function notificationData(input: NotificationCreateInput) {
-  if ((input.orderId ? 1 : 0) + (input.supportConversationId ? 1 : 0) !== 1) {
+  const references = [input.orderId, input.sellerOrderId, input.affiliateListingId, input.payoutRequestId, input.supportConversationId].filter(Boolean);
+  if (references.length !== 1) {
     throw new Error('A notification must reference exactly one entity');
   }
   return {
@@ -76,8 +92,41 @@ function notificationData(input: NotificationCreateInput) {
     message: input.message,
     dedupeKey: input.dedupeKey,
     orderId: input.orderId,
+    sellerOrderId: input.sellerOrderId,
+    affiliateListingId: input.affiliateListingId,
+    payoutRequestId: input.payoutRequestId,
     supportConversationId: input.supportConversationId,
   };
+}
+
+export function createSellerOrderStatusNotification(db: NotificationDb, sellerOrder: { id: string; orderNumber: string; affiliateUserId: string }, status: string, sourceKey: string) {
+  return createUserNotification(db, sellerOrder.affiliateUserId, {
+    type: NotificationType.AFFILIATE_ORDER_STATUS_CHANGED,
+    title: 'Actualización de venta',
+    message: `La venta ${sellerOrder.orderNumber} ahora está ${statusLabel(status)}.`,
+    dedupeKey: `seller-order-status:${sellerOrder.id}:${sourceKey}`,
+    sellerOrderId: sellerOrder.id,
+  });
+}
+
+export function createSellerOrderAdminNotifications(db: NotificationDb, sellerOrder: { id: string; orderNumber: string }, type: NotificationType, title: string, message: string, sourceKey: string) {
+  return createAdminNotifications(db, {
+    type,
+    title,
+    message,
+    dedupeKey: `seller-order-admin:${sellerOrder.id}:${sourceKey}`,
+    sellerOrderId: sellerOrder.id,
+  });
+}
+
+export async function createAffiliateListingNotification(db: NotificationDb, recipient: { userId?: string; adminId?: string }, listing: { id: string; productName: string }, type: NotificationType, title: string, message: string, sourceKey: string): Promise<CreatedNotification[]> {
+  const input: NotificationCreateInput = { type, title, message, dedupeKey: `affiliate-listing:${listing.id}:${sourceKey}`, affiliateListingId: listing.id };
+  return recipient.userId ? [await createUserNotification(db, recipient.userId, input)] : createAdminNotifications(db, input);
+}
+
+export async function createAffiliatePayoutNotification(db: NotificationDb, recipient: { userId?: string; adminId?: string }, payout: { id: string; amountMinor: bigint }, type: NotificationType, title: string, message: string, sourceKey: string): Promise<CreatedNotification[]> {
+  const input: NotificationCreateInput = { type, title, message, dedupeKey: `affiliate-payout:${payout.id}:${sourceKey}`, payoutRequestId: payout.id };
+  return recipient.userId ? [await createUserNotification(db, recipient.userId, input)] : createAdminNotifications(db, input);
 }
 
 async function createUnique(db: NotificationDb, recipient: { userId?: string; adminId?: string }, input: NotificationCreateInput): Promise<CreatedNotification> {
