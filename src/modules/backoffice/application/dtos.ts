@@ -216,6 +216,7 @@ export type OrderDto = {
     commission: MoneyDto;
     sellerNet: MoneyDto;
     fulfillmentType: 'SHIPMENT' | 'PICKUP';
+    allowedActions: string[];
     items: Array<{ id: string; productId: string; name: string; quantity: number; unitPrice: MoneyDto; lineTotal: MoneyDto }>;
     timeline: Array<{ id: string; fromStatus: string | null; toStatus: string; note: string | null; createdAt: Date }>;
     issues: Array<{ id: string; status: string; reason: string; createdAt: Date }>;

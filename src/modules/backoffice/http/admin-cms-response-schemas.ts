@@ -116,6 +116,23 @@ const adminTimelineSchema = z.object({
   id: z.string().uuid(), orderId: z.string().uuid(), fromStatus: z.enum(orderStatuses).nullable(),
   toStatus: z.enum(orderStatuses), note: z.string().nullable(), createdAt: dateTime, changedById: z.string().uuid().nullable(),
 });
+const adminSellerOrderStatusSchema = z.enum(['PENDING_PAYMENT', 'PAID', 'PREPARING', 'READY_FOR_PICKUP', 'PICKED_UP', 'SHIPPED', 'COMPLETED', 'CANCELLATION_REQUESTED', 'CANCELLED', 'DISPUTED', 'REFUNDED']);
+const adminSellerOrderSchema = z.object({
+  id: z.string().uuid(), number: z.string(), sellerType: z.enum(['STORE', 'AFFILIATE']), affiliateId: z.string().uuid().nullable(),
+  sellerName: z.string(), status: adminSellerOrderStatusSchema, version: z.number().int(), subtotal: adminMoneySchema,
+  shipping: adminMoneySchema, commission: adminMoneySchema, sellerNet: adminMoneySchema, fulfillmentType: z.enum(['SHIPMENT', 'PICKUP']),
+  allowedActions: z.array(z.string()),
+  items: z.array(z.object({
+    id: z.string().uuid(), productId: z.string().uuid(), name: z.string(), quantity: z.number().int(),
+    unitPrice: adminMoneySchema, lineTotal: adminMoneySchema,
+  })),
+  timeline: z.array(z.object({
+    id: z.string().uuid(), sellerOrderId: z.string().uuid(), fromStatus: adminSellerOrderStatusSchema.nullable(),
+    toStatus: adminSellerOrderStatusSchema, note: z.string().nullable(), createdAt: dateTime,
+    changedByType: z.string().nullable(), changedById: z.string().uuid().nullable(),
+  })),
+  issues: z.array(z.object({ id: z.string().uuid(), status: z.string(), reason: z.string(), createdAt: dateTime })),
+});
 
 export const adminOrderSchema = z.object({
   id: z.string().uuid(), number: z.string(), version: z.number().int(), status: z.enum(orderStatuses),
@@ -128,7 +145,7 @@ export const adminOrderSchema = z.object({
   }),
   customer: adminOrderCustomerSchema, fulfillment: z.discriminatedUnion('type', [adminShipmentSchema, adminPickupSchema]),
   items: z.array(adminOrderItemSchema), reservations: z.array(adminReservationSchema), payment: adminPaymentSchema.nullable(),
-  receipts: z.array(adminReceiptSchema), timeline: z.array(adminTimelineSchema), allowedActions: z.array(z.string()),
+  receipts: z.array(adminReceiptSchema), timeline: z.array(adminTimelineSchema), sellerOrders: z.array(adminSellerOrderSchema), allowedActions: z.array(z.string()),
   expiresAt: nullableDateTime, createdAt: dateTime, updatedAt: dateTime,
 });
 export const adminOrderDetailDataSchema = z.object({ order: adminOrderSchema });

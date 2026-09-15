@@ -54,9 +54,17 @@ export function sellerOrderAllowedActions(order: { status: SellerOrderStatus; se
     if (order.affiliateId && !closedStatuses.has(order.status) && order.status !== SellerOrderStatus.CANCELLATION_REQUESTED) result.push('OPEN_ISSUE');
     return result;
   }
-  if (actor === 'ADMIN' || actor === 'SYSTEM') {
+  if (actor === 'ADMIN') {
+    if (order.status === SellerOrderStatus.PAID) result.push('START_PREPARING');
+    if (order.status === SellerOrderStatus.PREPARING) result.push(order.fulfillmentType === FulfillmentType.PICKUP ? 'READY_FOR_PICKUP' : 'MARK_SHIPPED');
+    if (order.status === SellerOrderStatus.READY_FOR_PICKUP) result.push('MARK_PICKED_UP');
     if (order.status === SellerOrderStatus.SHIPPED || order.status === SellerOrderStatus.PICKED_UP) result.push('COMPLETE');
-    if (!closedStatuses.has(order.status)) result.push('CANCEL', 'REFUND');
+    if (order.status === SellerOrderStatus.PENDING_PAYMENT) result.push('CANCEL');
+    if (order.status !== SellerOrderStatus.PENDING_PAYMENT && order.status !== SellerOrderStatus.CANCELLED && order.status !== SellerOrderStatus.REFUNDED) result.push('REFUND');
+    return result;
+  }
+  if (actor === 'SYSTEM') {
+    if (order.status === SellerOrderStatus.SHIPPED || order.status === SellerOrderStatus.PICKED_UP) result.push('COMPLETE');
     return result;
   }
   return result;
@@ -168,10 +176,18 @@ export async function transitionSellerOrder(tx: Db, args: {
     if (args.nextStatus !== SellerOrderStatus.COMPLETED || !(new Set<SellerOrderStatus>([SellerOrderStatus.SHIPPED, SellerOrderStatus.PICKED_UP])).has(current.status)) throw conflict('INVALID_SELLER_ORDER_TRANSITION', 'The seller order cannot be completed automatically');
   } else if (args.actor === 'ADMIN') {
     const allowed = sellerOrderAllowedActions(current, 'ADMIN');
-    if (args.nextStatus === SellerOrderStatus.COMPLETED && !allowed.includes('COMPLETE')) throw conflict('INVALID_SELLER_ORDER_TRANSITION', 'Only shipped or picked-up seller orders can be completed');
-    if (args.nextStatus === SellerOrderStatus.CANCELLED && (current.status !== SellerOrderStatus.PENDING_PAYMENT || !allowed.includes('CANCEL'))) throw conflict('USE_REFUND_FLOW', 'Paid seller orders must use the audited refund action');
     if (args.nextStatus === SellerOrderStatus.REFUNDED) throw conflict('USE_REFUND_FLOW', 'Use the audited refund action to close a seller order as refunded');
-    if (args.nextStatus !== SellerOrderStatus.COMPLETED && args.nextStatus !== SellerOrderStatus.CANCELLED) throw conflict('INVALID_SELLER_ORDER_TRANSITION', 'The seller order cannot use this status transition');
+    if (args.nextStatus === SellerOrderStatus.CANCELLED && current.status !== SellerOrderStatus.PENDING_PAYMENT) throw conflict('USE_REFUND_FLOW', 'Paid seller orders must use the audited refund action');
+    const actionByStatus: Partial<Record<SellerOrderStatus, SellerOrderAction>> = {
+      PREPARING: 'START_PREPARING',
+      READY_FOR_PICKUP: 'READY_FOR_PICKUP',
+      PICKED_UP: 'MARK_PICKED_UP',
+      SHIPPED: 'MARK_SHIPPED',
+      COMPLETED: 'COMPLETE',
+      CANCELLED: 'CANCEL',
+    };
+    const action = actionByStatus[args.nextStatus];
+    if (!action || !allowed.includes(action)) throw conflict('INVALID_SELLER_ORDER_TRANSITION', 'The seller order cannot use this status transition');
   }
   const now = new Date();
   const autoCompleteAt = (new Set<SellerOrderStatus>([SellerOrderStatus.SHIPPED, SellerOrderStatus.PICKED_UP])).has(args.nextStatus)
