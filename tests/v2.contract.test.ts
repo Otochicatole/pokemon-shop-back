@@ -58,6 +58,29 @@ describe('v2 public contract', () => {
     }));
   });
 
+  it('documents the customer-owned Mercado Pago status refresh', async () => {
+    const response = await request(app).get('/openapi.json');
+    const operation = response.body.paths['/api/v2/orders/{number}/payment-status/refresh']?.post;
+
+    expect(response.status).toBe(200);
+    expect(operation).toEqual(expect.objectContaining({
+      security: [{ userCookie: [] }],
+      responses: expect.objectContaining({
+        200: expect.any(Object),
+        401: expect.any(Object),
+        403: expect.any(Object),
+        404: expect.any(Object),
+        409: expect.any(Object),
+        429: expect.any(Object),
+        503: expect.any(Object),
+      }),
+    }));
+    expect(operation.parameters).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'number', in: 'path', required: true }),
+      expect.objectContaining({ name: 'x-csrf-token', in: 'header', required: true }),
+    ]));
+  });
+
   it('returns problem details for unknown v2 routes', async () => {
     const response = await request(app).get('/api/v2/does-not-exist');
     expect(response.status).toBe(404);

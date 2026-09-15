@@ -149,6 +149,7 @@ function rollbackTarget(order: Pick<OrderRecord, 'status' | 'statusHistory'>): O
 }
 
 function mapOrder(value: OrderRecord): OrderDto {
+  const mercadoPago = value.payment?.mercadoPago;
   return {
     id: value.id, number: value.number, version: value.version, status: value.status,
     paymentMethod: value.paymentMethod, fulfillmentType: value.fulfillmentType,
@@ -175,7 +176,16 @@ function mapOrder(value: OrderRecord): OrderDto {
     payment: value.payment ? {
       id: value.payment.id, method: value.payment.method, status: value.payment.status, amount: money(value.payment.amountMinor), providerReference: value.payment.providerReference,
       bankTransfer: value.payment.transfer,
-      mercadoPago: value.payment.mercadoPago,
+      mercadoPago: mercadoPago ? {
+        id: mercadoPago.id,
+        paymentId: mercadoPago.paymentId,
+        preferenceId: mercadoPago.preferenceId,
+        externalPaymentId: mercadoPago.externalPaymentId,
+        status: mercadoPago.status,
+        statusDetail: mercadoPago.statusDetail,
+        checkoutUrl: mercadoPago.checkoutUrl,
+        expiresAt: mercadoPago.expiresAt,
+      } : null,
       refunds: value.payment.refunds.map((refund) => ({ id: refund.id, amount: money(refund.amountMinor), reason: refund.reason, externalReference: refund.externalReference, createdAt: refund.createdAt })),
     } : null,
     receipts: value.transferReceipts.map((receipt) => ({ id: receipt.id, fileId: receipt.fileId, url: `/media/private/${receipt.fileId}`, review: receipt.review, note: receipt.note, createdAt: receipt.createdAt, reviewedAt: receipt.reviewedAt, reviewedById: receipt.reviewedById })),

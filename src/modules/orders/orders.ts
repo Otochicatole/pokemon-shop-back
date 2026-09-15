@@ -8,6 +8,7 @@ import { env } from '../../config/env.js';
 import { conflict, badRequest, forbidden, notFound, AppError } from '../../shared/errors.js';
 import { currentUser, requireUser } from '../../infrastructure/sessions.js';
 import { prisma as db, writeCoordinator } from '../../infrastructure/prisma.js';
+import { rateLimit } from '../../infrastructure/rate-limit.js';
 import { publicOrderNumber, sha256 } from '../../shared/ids.js';
 import { moneyDto } from '../../shared/money.js';
 import { BASE_CURRENCY } from '../../shared/currency.js';
@@ -490,6 +491,7 @@ async function mercadoPagoAvailability(prisma: PrismaClient, gateway: MercadoPag
 
 export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?: SupportRealtimeHub, mercadoPago: MercadoPagoGateway | null = createMercadoPagoGateway()): Router {
   const router = Router();
+  const mercadoPagoRefreshLimit = rateLimit(10, 60_000, (request) => `mercado-pago-refresh:${currentUser(request)?.user.id ?? request.ip ?? 'unknown'}`);
   router.get('/checkout/options', async (_req, res) => {
     const [zones, pickupPoints] = await Promise.all([
       prisma.shippingZone.findMany({ where: { active: true }, include: { provinces: true, rates: { where: { active: true }, orderBy: { priceMinor: 'asc' } } }, orderBy: { name: 'asc' } }),
@@ -656,6 +658,33 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?:
     }
   });
 
+  router.post('/orders/:number/payment-status/refresh', requireUser, mercadoPagoRefreshLimit, async (req, res) => {
+    const user = currentUser(req)!.user;
+    const existing = await prisma.order.findFirst({
+      where: { number: String(req.params.number), userId: user.id, paymentMethod: 'MERCADO_PAGO' },
+      select: { id: true, payment: { select: { mercadoPago: { select: { providerOrderId: true } } } } },
+    });
+    if (!existing) throw notFound('Order not found');
+    if (!mercadoPago) throw mercadoPagoConfigError();
+    const providerOrderId = existing.payment?.mercadoPago?.providerOrderId;
+    if (!providerOrderId) throw conflict('PAYMENT_STATUS_NOT_REFRESHABLE', 'Mercado Pago checkout has not been created for this order');
+
+    try {
+      await reconcileMercadoOrder(providerOrderId, realtime, mercadoPago);
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      logger.error({ err: error, orderId: existing.id }, 'Mercado Pago payment status refresh failed');
+      throw new AppError(503, 'PAYMENT_PROVIDER_UNAVAILABLE', 'Mercado Pago no está disponible; intentá nuevamente');
+    }
+
+    const [order, transferSettings] = await Promise.all([
+      prisma.order.findUniqueOrThrow({ where: { id: existing.id }, include: { items: true, sellerOrders: { include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } }, issues: true } }, statusHistory: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }, transferReceipts: { orderBy: { createdAt: 'desc' }, take: 1 }, payment: { include: { transfer: true, mercadoPago: { include: { exchangeRateSnapshot: true } } } } } }),
+      getTransferSettings(prisma),
+    ]);
+    logger.info({ orderId: existing.id, providerOrderId, orderStatus: order.status, paymentStatus: order.payment?.status ?? null }, 'Mercado Pago payment status refreshed');
+    return res.json({ order: mapOrder(order, transferSettings) });
+  });
+
   router.get('/orders', requireUser, async (req, res) => {
     const user = currentUser(req)!.user;
     const transferSettings = await getTransferSettings(prisma);
@@ -770,6 +799,7 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?:
       create: { provider: 'mercadopago', externalKey: notificationId, notificationId, resourceId: bodyResourceId, payload: JSON.stringify(req.body), nextAttemptAt: new Date() },
       update: { resourceId: bodyResourceId, payload: JSON.stringify(req.body), receivedAt: new Date(), nextAttemptAt: new Date(), lockedAt: null, failedAt: null },
     });
+    logger.info({ notificationId, resourceId: bodyResourceId, type: parsed.data.type, action: parsed.data.action ?? null }, 'Mercado Pago webhook accepted');
     return res.status(200).json({ received: true });
   });
 

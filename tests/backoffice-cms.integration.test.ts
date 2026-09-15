@@ -17,6 +17,7 @@ const productImageFileIds = [randomUUID(), randomUUID(), randomUUID()];
 const actor = { adminId, requestId: `cms-test-${randomUUID()}` };
 let orderNumber = '';
 let rejectedOrderNumber = '';
+let mercadoPagoOrderNumber = '';
 const rejectedReceiptFileIds = [randomUUID(), randomUUID()];
 
 describe('backoffice CMS invariants', () => {
@@ -30,6 +31,7 @@ describe('backoffice CMS invariants', () => {
     await prisma.refundRecord.deleteMany({ where: { createdById: adminId } });
     if (orderNumber) await prisma.order.deleteMany({ where: { number: orderNumber } });
     if (rejectedOrderNumber) await prisma.order.deleteMany({ where: { number: rejectedOrderNumber } });
+    if (mercadoPagoOrderNumber) await prisma.order.deleteMany({ where: { number: mercadoPagoOrderNumber } });
     await prisma.storedFile.deleteMany({ where: { id: fileId } });
     await prisma.storedFile.deleteMany({ where: { id: { in: rejectedReceiptFileIds } } });
     await prisma.fileCleanupJob.deleteMany({ where: { fileId: { in: productImageFileIds } } });
@@ -136,6 +138,51 @@ describe('backoffice CMS invariants', () => {
     expect(order.reservations[0]?.consumedAt).not.toBeNull();
     expect(receipt.review).toBe('APPROVED');
     await expect(cms.payments.reviewTransfer(actor, orderNumber, receiptId, 1, 'APPROVED')).rejects.toBeInstanceOf(AppError);
+  });
+
+  it('returns JSON-serializable admin orders for Mercado Pago Orders API payments', async () => {
+    mercadoPagoOrderNumber = `BCS-CMS-MP-${Date.now()}`;
+    const providerOrderId = `ORD-${fixtureKey}`;
+    await prisma.order.create({
+      data: {
+        userId,
+        number: mercadoPagoOrderNumber,
+        paymentMethod: 'MERCADO_PAGO',
+        fulfillmentType: 'PICKUP',
+        subtotalMinor: 1n,
+        shippingMinor: 0n,
+        totalMinor: 1n,
+        idempotencyKey: randomUUID(),
+        idempotencyHash: 'mercado-pago-admin-list',
+        payment: {
+          create: {
+            method: 'MERCADO_PAGO',
+            status: 'PENDING',
+            amountMinor: 1n,
+            mercadoPago: {
+              create: {
+                integrationMode: 'ORDER_V1',
+                providerOrderId,
+                providerAmountMinor: 9_360n,
+                providerCurrency: 'ARS',
+                status: 'created',
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const result = await cms.orders.list({ search: mercadoPagoOrderNumber, limit: 20 });
+
+    expect(result.data).toHaveLength(1);
+    expect(() => JSON.stringify(result)).not.toThrow();
+    expect(result.data[0]?.payment?.mercadoPago).toEqual(expect.objectContaining({
+      preferenceId: null,
+      externalPaymentId: null,
+      status: 'created',
+    }));
+    expect(result.data[0]?.payment?.mercadoPago).not.toHaveProperty('providerAmountMinor');
   });
 
   it('rejects every still-pending receipt when rejecting a transfer order', async () => {

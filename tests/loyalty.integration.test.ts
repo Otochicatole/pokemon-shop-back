@@ -281,6 +281,7 @@ describe('loyalty purchase lifecycle', () => {
       external_reference: number,
       transaction_amount: 15,
       currency_id: 'USD',
+      collector_id: env.MERCADOPAGO_COLLECTOR_ID,
       status: 'refunded',
       status_detail: 'refunded',
     } as never);

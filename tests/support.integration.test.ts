@@ -157,12 +157,13 @@ describe('support conversations and realtime notifications', () => {
   });
 
   it('delivers customer messages to authenticated administrators and maintains unread counters', async () => {
+    const initialAdminUnreadCount = await getSupportUnreadCount(prisma, { type: 'ADMIN', id: adminId });
     adminSocket = new WebSocket(`${wsBaseUrl}/api/v2/support/ws?role=admin`, {
       origin: 'http://localhost:3001',
       headers: { Cookie: cookie(ADMIN_COOKIE, adminToken) },
     });
     const ready = await waitForEvent(adminSocket, 'connection.ready');
-    expect(ready.payload).toMatchObject({ actorType: 'ADMIN', actorId: adminId, unreadCount: 0 });
+    expect(ready.payload).toMatchObject({ actorType: 'ADMIN', actorId: adminId, unreadCount: initialAdminUnreadCount });
 
     const initialClientMessageId = randomUUID();
     let createdEventCount = 0;
@@ -223,7 +224,7 @@ describe('support conversations and realtime notifications', () => {
       .get('/api/v2/admin/support/unread-count')
       .set('Cookie', cookie(ADMIN_COOKIE, adminToken));
     expect(unread.status).toBe(200);
-    expect(unread.body.data.count).toBe(2);
+    expect(unread.body.data.count).toBe(initialAdminUnreadCount + 2);
 
     userSocket = new WebSocket(`${wsBaseUrl}/api/v2/support/ws?role=user`, {
       origin: 'http://localhost:3001',
@@ -237,7 +238,7 @@ describe('support conversations and realtime notifications', () => {
       .set('X-CSRF-Token', adminCsrf)
       .send({ messageId: sent.body.data.message.id });
     expect(read.status).toBe(200);
-    expect(read.body.data).toMatchObject({ conversationId, unreadCount: 0 });
+    expect(read.body.data).toMatchObject({ conversationId, unreadCount: initialAdminUnreadCount });
     expect((await readEvent).payload).toMatchObject({ conversationId, readerType: 'ADMIN', readerId: 'support-team' });
   });
 

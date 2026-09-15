@@ -311,6 +311,21 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
     responses: { 200: { description: 'Existing or recovered Mercado Pago checkout session', content: { 'application/json': { schema: envelope(z.object({ checkoutUrl: z.string().url().nullable(), expiresAt: dateTimeSchema.nullable(), order: publicOrderSchema })) } } }, ...publicErrors },
   });
   registry.registerPath({
+    method: 'post', path: '/api/v2/orders/{number}/payment-status/refresh', tags: ['Orders'], security: userSecurity,
+    summary: 'Reconcile a customer order with Mercado Pago',
+    description: 'Fetches the associated Checkout Pro Order from Mercado Pago and idempotently applies its authoritative payment state. The order must belong to the authenticated customer.',
+    request: { params: z.object({ number: z.string().min(1) }), headers: csrfHeader },
+    responses: {
+      200: { description: 'Order status reconciled with Mercado Pago', content: { 'application/json': { schema: envelope(z.object({ order: publicOrderSchema })) } } },
+      401: publicErrors[401],
+      403: publicErrors[403],
+      404: { description: 'Order not found for the authenticated customer', content: { 'application/json': { schema: problemSchema } } },
+      409: { description: 'The Mercado Pago provider order has not been created yet', content: { 'application/json': { schema: problemSchema } } },
+      429: { description: 'Too many refresh attempts', content: { 'application/json': { schema: problemSchema } } },
+      503: publicErrors[503],
+    },
+  });
+  registry.registerPath({
     method: 'post', path: '/api/v2/webhooks/mercado-pago', tags: ['Payments'],
     request: { query: z.object({ 'data.id': z.string().min(1).optional(), type: z.enum(['order', 'payment']).optional() }), headers: z.object({ 'x-signature': z.string(), 'x-request-id': z.string() }), body: { required: true, content: { 'application/json': { schema: z.object({ id: z.union([z.string(), z.number()]), type: z.enum(['order', 'payment']), action: z.string().optional(), data: z.object({ id: z.union([z.string(), z.number()]) }) }) } } } },
     responses: { 200: { description: 'Notification persisted for durable processing', content: { 'application/json': { schema: z.object({ received: z.literal(true) }) } } }, 400: publicErrors[400], 401: publicErrors[401], 503: publicErrors[503] },
