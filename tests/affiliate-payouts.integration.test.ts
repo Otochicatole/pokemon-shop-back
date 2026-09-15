@@ -39,6 +39,16 @@ describe('admin affiliate payout detail', () => {
         dedupeKey: `payout-detail-test:${payoutId}`,
       },
     });
+    await prisma.affiliateLedgerEntry.create({
+      data: {
+        affiliateId,
+        payoutId,
+        bucket: 'AVAILABLE',
+        type: 'SALE_RELEASED',
+        amountMinor: 5000n,
+        dedupeKey: `payout-detail-available-test:${payoutId}`,
+      },
+    });
     await prisma.admin.create({
       data: { id: adminId, email: adminEmail, passwordHash: await hashPassword(adminPassword) },
     });
@@ -62,6 +72,7 @@ describe('admin affiliate payout detail', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.data.payout.amountMinor).toBe('1250');
+    expect(response.body.data.availableMinor).toBe('5000');
     expect(response.body.data.ledger[0].amountMinor).toBe('1250');
     expect(response.body.data.payout).not.toHaveProperty('ledgerEntries');
   });

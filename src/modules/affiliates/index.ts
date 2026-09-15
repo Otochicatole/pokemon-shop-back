@@ -525,7 +525,8 @@ export function createAdminAffiliateRouter(prisma: PrismaClient, realtime?: Supp
     const payout = await prisma.affiliatePayoutRequest.findUnique({ where: { id: String(req.params.id) }, include: { affiliate: true, ledgerEntries: true } });
     if (!payout) throw notFound('Payout request not found');
     const { ledgerEntries, ...payoutData } = payout;
-    return res.json({ payout: { ...payoutData, amountMinor: money(payout.amountMinor), destinationCipher: undefined, destinationLast4: payout.destinationLast4, affiliate: { id: payout.affiliate.id, publicName: payout.affiliate.publicName } }, ledger: ledgerEntries.map((entry) => ({ ...entry, amountMinor: money(entry.amountMinor) })) });
+    const available = await prisma.affiliateLedgerEntry.aggregate({ _sum: { amountMinor: true }, where: { affiliateId: payout.affiliateId, bucket: AffiliateLedgerBucket.AVAILABLE } });
+    return res.json({ payout: { ...payoutData, amountMinor: money(payout.amountMinor), destinationCipher: undefined, destinationLast4: payout.destinationLast4, affiliate: { id: payout.affiliate.id, publicName: payout.affiliate.publicName } }, availableMinor: money(available._sum.amountMinor ?? 0n), ledger: ledgerEntries.map((entry) => ({ ...entry, amountMinor: money(entry.amountMinor) })) });
   });
   router.post('/payouts/:id/reveal-destination', async (req, res) => {
     const admin = currentAdmin(req); if (!admin) throw forbidden();
