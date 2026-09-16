@@ -27,6 +27,7 @@ import {
   adminLoginSchema,
   forgotPasswordSchema,
   loginSchema,
+  profileUpdateSchema,
   registerSchema,
   resetSchema,
   tokenSchema,
@@ -133,6 +134,52 @@ export function createAuthRouter(prisma: PrismaClient, options: AuthRouterOption
   router.get('/me', requireUser, async (req, res) => {
     const session = currentUser(req)!;
     return res.json({ user: toPublicUser(session.user, await findAffiliateForSession(prisma, session.userId)) });
+  });
+
+  router.patch('/profile', requireUser, async (req, res) => {
+    const input = profileUpdateSchema.parse(req.body);
+    const session = currentUser(req)!;
+    const user = await prisma.user.findUnique({ where: { id: session.userId } });
+    if (!user || user.status !== 'ACTIVE') throw unauthorized();
+
+    const passwordChanged = input.newPassword !== undefined;
+    if (passwordChanged && user.passwordHash) {
+      if (!input.currentPassword) throw badRequest('CURRENT_PASSWORD_REQUIRED', 'Ingresá tu contraseña actual para definir una nueva');
+      if (!(await verifyPassword(user.passwordHash, input.currentPassword))) throw badRequest('CURRENT_PASSWORD_INVALID', 'La contraseña actual no es correcta');
+    }
+
+    const passwordHash = passwordChanged ? await hashPassword(input.newPassword!) : undefined;
+    const result = await prisma.$transaction(async (tx) => {
+      const updatedUser = await tx.user.update({
+        where: { id: user.id },
+        data: {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(passwordHash ? { passwordHash } : {}),
+        },
+      });
+      // Keep this browser signed in while invalidating every other session
+      // after a password change.
+      const revokedSessions = passwordChanged
+        ? await tx.userSession.findMany({
+          where: { userId: user.id, revokedAt: null, id: { not: session.id } },
+          select: { id: true },
+        })
+        : [];
+      if (passwordChanged && revokedSessions.length > 0) {
+        await tx.userSession.updateMany({
+          where: { userId: user.id, revokedAt: null, id: { not: session.id } },
+          data: { revokedAt: new Date() },
+        });
+      }
+      return { updatedUser, revokedSessions };
+    });
+    for (const revokedSession of result.revokedSessions) {
+      options.onSessionRevoked?.({ actorType: 'USER', actorId: user.id, sessionId: revokedSession.id });
+    }
+    return res.json({
+      user: toPublicUser(result.updatedUser, await findAffiliateForSession(prisma, user.id)),
+      passwordChanged,
+    });
   });
 
   router.post('/verify-email', async (req, res) => {

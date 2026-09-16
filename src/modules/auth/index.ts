@@ -6,6 +6,7 @@ export {
   csrfTokenSchema,
   forgotPasswordSchema,
   loginSchema,
+  profileUpdateSchema,
   registerSchema,
   resetSchema,
   tokenSchema,

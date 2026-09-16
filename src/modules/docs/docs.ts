@@ -11,7 +11,7 @@ import {
   catalogMoneySchema,
   catalogProductSchema,
 } from '../catalog/index.js';
-import { adminLoginSchema, adminPrincipalSchema, csrfTokenSchema } from '../auth/index.js';
+import { adminLoginSchema, adminPrincipalSchema, csrfTokenSchema, profileUpdateSchema } from '../auth/index.js';
 import { registerAdminCmsPaths } from './admin-docs.js';
 import {
   createAdminSupportConversationSchema,
@@ -163,6 +163,13 @@ const supportConversationSchema = z.object({
   updatedAt: dateTimeSchema,
   unreadCount: z.number().int().nonnegative(),
 });
+const publicUserSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email(),
+  name: z.string().nullable(),
+  emailVerified: z.boolean(),
+  affiliate: z.object({ id: z.string().uuid(), publicName: z.string(), status: z.enum(['ACTIVE', 'SUSPENDED']) }).nullable(),
+});
 
 export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
   const registry = new OpenAPIRegistry();
@@ -244,6 +251,18 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
     responses: {
       204: { description: 'Admin session revoked' },
       403: { description: 'Invalid admin CSRF token', content: { 'application/json': { schema: problemSchema } } },
+    },
+  });
+  registry.registerPath({
+    method: 'patch',
+    path: '/api/v2/auth/profile',
+    tags: ['Customer authentication'],
+    summary: 'Update the current customer profile without changing the email address',
+    security: userSecurity,
+    request: { headers: csrfHeader, body: { required: true, content: { 'application/json': { schema: profileUpdateSchema } } } },
+    responses: {
+      200: { description: 'Profile updated', content: { 'application/json': { schema: envelope(z.object({ user: publicUserSchema, passwordChanged: z.boolean() })) } } },
+      ...publicErrors,
     },
   });
   registry.registerPath({ method: 'get', path: '/api/v2/catalog/products', tags: ['Catalog'], request: { query: catalogListQuerySchema }, responses: { 200: { description: 'Published products filtered and sorted by the server', content: { 'application/json': { schema: z.object({ data: z.array(catalogProductSchema), meta: z.object({ nextCursor: z.string().nullable() }) }) } } } } });
