@@ -10,6 +10,13 @@ export const USER_COOKIE = `${cookiePrefix}bcs_user`;
 export const ADMIN_COOKIE = `${cookiePrefix}bcs_admin`;
 export const USER_CSRF_COOKIE = `${cookiePrefix}bcs_user_csrf`;
 export const ADMIN_CSRF_COOKIE = `${cookiePrefix}bcs_admin_csrf`;
+// Keep accepting cookies issued before COOKIE_SECURE was changed. This lets a
+// user log out and receive a fresh session instead of getting stuck between
+// the legacy and __Host- cookie names.
+export const LEGACY_USER_COOKIE = `${cookiePrefix ? '' : '__Host-'}bcs_user`;
+export const LEGACY_ADMIN_COOKIE = `${cookiePrefix ? '' : '__Host-'}bcs_admin`;
+export const LEGACY_USER_CSRF_COOKIE = `${cookiePrefix ? '' : '__Host-'}bcs_user_csrf`;
+export const LEGACY_ADMIN_CSRF_COOKIE = `${cookiePrefix ? '' : '__Host-'}bcs_admin_csrf`;
 
 export const ADMIN_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 export const ADMIN_ABSOLUTE_TIMEOUT_MS = 8 * 60 * 60 * 1000;
@@ -28,13 +35,16 @@ type AdminSessionLookupOptions = {
   onSessionRevoked?: SessionRevocationHandler;
 };
 
-const cookieOptions = (httpOnly: boolean) => ({
+const cookieOptions = (httpOnly: boolean, secure = env.cookieSecure) => ({
   httpOnly,
-  secure: env.cookieSecure,
+  secure,
   sameSite: 'strict' as const,
   path: '/',
   maxAge: httpOnly ? undefined : 8 * 60 * 60 * 1000,
 });
+
+const clearCookieOptions = (name: string, httpOnly: boolean) => cookieOptions(httpOnly, name.startsWith('__Host-') || env.cookieSecure);
+const readCookie = (request: Request, currentName: string, legacyName: string) => request.cookies?.[currentName] as string | undefined ?? request.cookies?.[legacyName] as string | undefined;
 
 const validHash = (raw: string, hash: string): boolean => {
   const expected = Buffer.from(hash, 'hex');
@@ -96,7 +106,7 @@ export async function revokeUserSession(
   onSessionRevoked?: SessionRevocationHandler,
   clearCookies = true,
 ) {
-  const token = request.cookies?.[USER_COOKIE] as string | undefined;
+  const token = readCookie(request, USER_COOKIE, LEGACY_USER_COOKIE);
   const revocation = token ? await writeCoordinator.run(async () => {
     const session = await prisma.userSession.findUnique({
       where: { tokenHash: sha256(token) },
@@ -111,8 +121,10 @@ export async function revokeUserSession(
   }) : null;
   if (revocation) onSessionRevoked?.(revocation);
   if (clearCookies) {
-    response.clearCookie(USER_COOKIE, cookieOptions(true));
-    response.clearCookie(USER_CSRF_COOKIE, cookieOptions(false));
+    response.clearCookie(USER_COOKIE, clearCookieOptions(USER_COOKIE, true));
+    response.clearCookie(USER_CSRF_COOKIE, clearCookieOptions(USER_CSRF_COOKIE, false));
+    if (LEGACY_USER_COOKIE !== USER_COOKIE) response.clearCookie(LEGACY_USER_COOKIE, clearCookieOptions(LEGACY_USER_COOKIE, true));
+    if (LEGACY_USER_CSRF_COOKIE !== USER_CSRF_COOKIE) response.clearCookie(LEGACY_USER_CSRF_COOKIE, clearCookieOptions(LEGACY_USER_CSRF_COOKIE, false));
   }
   return revocation;
 }
@@ -123,7 +135,7 @@ export async function revokeAdminSession(
   onSessionRevoked?: SessionRevocationHandler,
   clearCookies = true,
 ) {
-  const token = request.cookies?.[ADMIN_COOKIE] as string | undefined;
+  const token = readCookie(request, ADMIN_COOKIE, LEGACY_ADMIN_COOKIE);
   const revocation = token ? await writeCoordinator.run(async () => {
     const session = await prisma.adminSession.findUnique({
       where: { tokenHash: sha256(token) },
@@ -138,8 +150,10 @@ export async function revokeAdminSession(
   }) : null;
   if (revocation) onSessionRevoked?.(revocation);
   if (clearCookies) {
-    response.clearCookie(ADMIN_COOKIE, cookieOptions(true));
-    response.clearCookie(ADMIN_CSRF_COOKIE, cookieOptions(false));
+    response.clearCookie(ADMIN_COOKIE, clearCookieOptions(ADMIN_COOKIE, true));
+    response.clearCookie(ADMIN_CSRF_COOKIE, clearCookieOptions(ADMIN_CSRF_COOKIE, false));
+    if (LEGACY_ADMIN_COOKIE !== ADMIN_COOKIE) response.clearCookie(LEGACY_ADMIN_COOKIE, clearCookieOptions(LEGACY_ADMIN_COOKIE, true));
+    if (LEGACY_ADMIN_CSRF_COOKIE !== ADMIN_CSRF_COOKIE) response.clearCookie(LEGACY_ADMIN_CSRF_COOKIE, clearCookieOptions(LEGACY_ADMIN_CSRF_COOKIE, false));
   }
   return revocation;
 }
@@ -152,7 +166,7 @@ export async function getUserSessionByToken(token: string | undefined) {
 }
 
 export async function getUserSession(request: Request) {
-  return getUserSessionByToken(request.cookies?.[USER_COOKIE] as string | undefined);
+  return getUserSessionByToken(readCookie(request, USER_COOKIE, LEGACY_USER_COOKIE));
 }
 
 export async function getAdminSessionByToken(token: string | undefined, options: AdminSessionLookupOptions = { touch: false }) {
@@ -196,7 +210,7 @@ export async function getAdminSessionByToken(token: string | undefined, options:
 }
 
 export async function getAdminSession(request: Request, options: AdminSessionLookupOptions = { touch: false }) {
-  return getAdminSessionByToken(request.cookies?.[ADMIN_COOKIE] as string | undefined, options);
+  return getAdminSessionByToken(readCookie(request, ADMIN_COOKIE, LEGACY_ADMIN_COOKIE), options);
 }
 
 export async function requireUser(request: Request, _response: Response, next: NextFunction) {

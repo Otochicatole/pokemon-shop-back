@@ -4,6 +4,8 @@ import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import { env } from '../../config/env.js';
 import {
   ADMIN_COOKIE,
+  LEGACY_ADMIN_COOKIE,
+  LEGACY_USER_COOKIE,
   getAdminSessionByToken,
   getUserSessionByToken,
   USER_COOKIE,
@@ -153,7 +155,7 @@ type AuthenticatedSocket = {
 async function authenticateUpgrade(request: IncomingMessage, role: string | null): Promise<AuthenticatedSocket | null> {
   const cookies = parseCookies(request.headers.cookie);
   if (role === 'user') {
-    const token = cookies[USER_COOKIE];
+    const token = cookies[USER_COOKIE] ?? cookies[LEGACY_USER_COOKIE];
     const session = await getUserSessionByToken(token);
     return session ? {
       actor: { type: 'USER', id: session.user.id },
@@ -162,7 +164,7 @@ async function authenticateUpgrade(request: IncomingMessage, role: string | null
     } : null;
   }
   if (role === 'admin') {
-    const token = cookies[ADMIN_COOKIE];
+    const token = cookies[ADMIN_COOKIE] ?? cookies[LEGACY_ADMIN_COOKIE];
     const session = await getAdminSessionByToken(token, { touch: false });
     return session ? {
       actor: { type: 'ADMIN', id: session.admin.id },

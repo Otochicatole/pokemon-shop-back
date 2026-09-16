@@ -32,7 +32,11 @@ import {
   tokenSchema,
 } from './auth-schemas.js';
 const GOOGLE_COOKIE = env.cookieSecure ? '__Host-bcs_google_oauth' : 'bcs_google_oauth';
-const redirectTarget = () => env.frontendOrigins[0] ?? 'http://localhost:5173';
+const LEGACY_GOOGLE_COOKIE = env.cookieSecure ? 'bcs_google_oauth' : '__Host-bcs_google_oauth';
+// The public web URL is the canonical host for browser redirects. CORS origins
+// may contain local fallbacks, but using the first one here can send an OAuth
+// callback to localhost after a tunnel login.
+const redirectTarget = () => (env.PUBLIC_WEB_URL ?? env.frontendOrigins[0] ?? 'http://localhost:5173').replace(/\/+$/, '');
 
 function signOAuth(value: string): string {
   const encoded = Buffer.from(value).toString('base64url');
@@ -188,7 +192,7 @@ export function createAuthRouter(prisma: PrismaClient, options: AuthRouterOption
 
   router.get('/google/callback', async (req, res) => {
     try {
-      const signed = req.cookies?.[GOOGLE_COOKIE] as string | undefined;
+      const signed = req.cookies?.[GOOGLE_COOKIE] as string | undefined ?? req.cookies?.[LEGACY_GOOGLE_COOKIE] as string | undefined;
       const raw = signed ? verifyOAuth(signed) : null;
       if (!raw) throw badRequest('INVALID_OAUTH_STATE', 'Invalid OAuth state');
       const attempt = JSON.parse(raw) as { verifier: string; state: string; nonce: string; mode: 'login' | 'link'; userId?: string; expiresAt: number };
@@ -210,6 +214,7 @@ export function createAuthRouter(prisma: PrismaClient, options: AuthRouterOption
         if (user && user.id !== owner.id) throw conflict('OAUTH_ACCOUNT_LINKED', 'Google account is already linked');
         if (!user) await prisma.userOAuthAccount.create({ data: { userId: owner.id, issuer, subject: claims.sub, emailAtLogin: claims.email } });
         res.clearCookie(GOOGLE_COOKIE, { path: '/' });
+        res.clearCookie(LEGACY_GOOGLE_COOKIE, { path: '/' });
         return res.redirect(`${redirectTarget()}/account?oauth=linked`);
       }
       if (!user) {
@@ -219,11 +224,14 @@ export function createAuthRouter(prisma: PrismaClient, options: AuthRouterOption
       }
       const session = await createUserSession(user.id, res, req, options.onSessionRevoked);
       res.clearCookie(GOOGLE_COOKIE, { path: '/' });
+      res.clearCookie(LEGACY_GOOGLE_COOKIE, { path: '/' });
       return res.redirect(`${redirectTarget()}/auth/callback?oauth=success`);
     } catch (error) {
       logger.warn({ err: error }, 'Google OAuth callback failed');
       res.clearCookie(GOOGLE_COOKIE, { path: '/' });
-      return res.redirect(`${redirectTarget()}/auth/callback?oauth=error`);
+      res.clearCookie(LEGACY_GOOGLE_COOKIE, { path: '/' });
+      const result = error instanceof AppError && error.code === 'EXPLICIT_LINK_REQUIRED' ? 'link-required' : 'error';
+      return res.redirect(`${redirectTarget()}/auth/callback?oauth=${result}`);
     }
   });
 

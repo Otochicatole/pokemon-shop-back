@@ -14,6 +14,8 @@ import {
   csrfProtection,
   getAdminSession,
   getUserSession,
+  LEGACY_ADMIN_COOKIE,
+  LEGACY_USER_COOKIE,
   touchAdminSessionForMutation,
   USER_COOKIE,
 } from './infrastructure/sessions.js';
@@ -39,9 +41,9 @@ export function createApp(composition = createCompositionRoot()): Express {
       const context: { userSession?: Awaited<ReturnType<typeof getUserSession>>; adminSession?: Awaited<ReturnType<typeof getAdminSession>> } = {};
       const isAdminApi = /^\/api\/v\d+\/admin(?:\/|$)/.test(req.path);
       const isPrivateMedia = req.path.startsWith('/media/private');
-      if ((!isAdminApi || isPrivateMedia) && req.cookies?.[USER_COOKIE]) context.userSession = await getUserSession(req);
+      if ((!isAdminApi || isPrivateMedia) && (req.cookies?.[USER_COOKIE] || req.cookies?.[LEGACY_USER_COOKIE])) context.userSession = await getUserSession(req);
       const needsAdminContext = isAdminApi || isPrivateMedia;
-      if (needsAdminContext && req.cookies?.[ADMIN_COOKIE]) {
+      if (needsAdminContext && (req.cookies?.[ADMIN_COOKIE] || req.cookies?.[LEGACY_ADMIN_COOKIE])) {
         context.adminSession = await getAdminSession(req, {
           touch: false,
           onSessionRevoked: (revocation) => composition.realtime.support.closeSession(revocation.actorType, revocation.sessionId),
