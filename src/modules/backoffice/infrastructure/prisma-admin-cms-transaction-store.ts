@@ -327,12 +327,17 @@ export class PrismaAdminCmsTransactionStore {
 
   async deleteProduct(actor: AdminActor, id: string, expectedVersion: number): Promise<void> {
     return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const terminalOrderStatuses = ['COMPLETED', 'CANCELLED', 'EXPIRED', 'REFUND_RECORDED'] as const;
       const existing = await tx.product.findUnique({
         where: { id },
         select: {
           status: true,
           inventory: { select: { reserved: true } },
-          orderItems: { select: { id: true }, take: 1 },
+          orderItems: {
+            where: { order: { status: { notIn: [...terminalOrderStatuses] } } },
+            select: { id: true },
+            take: 1,
+          },
           reservations: { where: { releasedAt: null, consumedAt: null }, select: { id: true }, take: 1 },
           images: { select: { file: { select: { id: true, storageKey: true } } } },
         },
@@ -340,7 +345,12 @@ export class PrismaAdminCmsTransactionStore {
       if (!existing) throw notFound('Product not found');
       if (existing.status !== 'ARCHIVED') throw conflict('PRODUCT_NOT_ARCHIVED', 'Only archived products can be deleted');
       if ((existing.inventory?.reserved ?? 0) > 0 || existing.reservations.length > 0) throw conflict('INVENTORY_RESERVED', 'Products with reserved units cannot be deleted');
-      if (existing.orderItems.length > 0) throw conflict('PRODUCT_HAS_ORDERS', 'Products referenced by orders cannot be deleted');
+      if (existing.orderItems.length > 0) {
+        throw conflict(
+          'PRODUCT_HAS_ORDERS',
+          'No se puede eliminar: el producto figura en órdenes activas. Sí se puede borrar si las órdenes relacionadas están completadas, canceladas o vencidas.',
+        );
+      }
 
       for (const image of existing.images) await scheduleFileCleanup(tx, image.file);
       await tx.inventoryReservation.deleteMany({ where: { productId: id } });

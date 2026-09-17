@@ -138,7 +138,7 @@ function affiliateDto(value: { id: string; userId: string; publicName: string; c
   return { id: value.id, userId: value.userId, publicName: value.publicName, contactPhone: value.contactPhone, payoutAccountLast4: value.payoutAccountLast4, commissionBpsOverride: value.commissionBpsOverride ?? null, status: value.status, version: value.version, user: value.user ? { id: value.user.id, email: value.user.email, name: value.user.name, emailVerified: Boolean(value.user.emailVerifiedAt) } : undefined, createdAt: value.createdAt, updatedAt: value.updatedAt };
 }
 
-function affiliateListingItems(items: Array<{ id: string; productId: string; productName: string; quantity: number; unitPriceMinor: bigint; lineTotalMinor: bigint }> | undefined) {
+function affiliateListingItems(items: Array<{ id: string; productId: string | null; productName: string; quantity: number; unitPriceMinor: bigint; lineTotalMinor: bigint }> | undefined) {
   return items?.map((item) => ({ ...item, unitPriceMinor: money(item.unitPriceMinor), lineTotalMinor: money(item.lineTotalMinor) })) ?? [];
 }
 
@@ -150,7 +150,7 @@ function serializeAffiliateValue(value: unknown): unknown {
   return value;
 }
 
-function affiliateSellerOrderDto(order: { items?: Array<{ id: string; productId: string; productName: string; quantity: number; unitPriceMinor: bigint; lineTotalMinor: bigint }>; subtotalMinor: bigint; shippingMinor: bigint; commissionMinor: bigint; sellerNetMinor: bigint; [key: string]: unknown }, revealFulfillment = true) {
+function affiliateSellerOrderDto(order: { items?: Array<{ id: string; productId: string | null; productName: string; quantity: number; unitPriceMinor: bigint; lineTotalMinor: bigint }>; subtotalMinor: bigint; shippingMinor: bigint; commissionMinor: bigint; sellerNetMinor: bigint; [key: string]: unknown }, revealFulfillment = true) {
   const { items, subtotalMinor, shippingMinor, commissionMinor, sellerNetMinor, order: _order, ...rest } = order;
   if (!revealFulfillment) for (const key of ['recipientName', 'recipientPhone', 'addressLine1', 'addressLine2', 'city', 'province', 'postalCode', 'pickupPointAddress']) delete rest[key];
   return { ...serializeAffiliateValue(rest) as Record<string, unknown>, subtotalMinor: money(subtotalMinor), shippingMinor: money(shippingMinor), commissionMinor: money(commissionMinor), sellerNetMinor: money(sellerNetMinor), items: affiliateListingItems(items) };

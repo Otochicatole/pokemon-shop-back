@@ -84,7 +84,7 @@ const adminPickupSchema = z.object({
   type: z.literal('PICKUP'), pickupPointId: z.string().uuid().nullable(), name: z.string().nullable(), address: z.string().nullable(),
 });
 const adminOrderItemSchema = z.object({
-  id: z.string().uuid(), productId: z.string().uuid(), sku: z.string(), name: z.string(),
+  id: z.string().uuid(), productId: z.string().uuid().nullable(), sku: z.string(), name: z.string(),
   imageFileId: z.string().uuid().nullable(), imageUrl: z.string().nullable(), unitPrice: adminMoneySchema,
   quantity: z.number().int(), lineTotal: adminMoneySchema, snapshot: z.unknown(),
 });
@@ -123,7 +123,7 @@ const adminSellerOrderSchema = z.object({
   shipping: adminMoneySchema, commission: adminMoneySchema, sellerNet: adminMoneySchema, fulfillmentType: z.enum(['SHIPMENT', 'PICKUP']),
   allowedActions: z.array(z.string()),
   items: z.array(z.object({
-    id: z.string().uuid(), productId: z.string().uuid(), name: z.string(), quantity: z.number().int(),
+    id: z.string().uuid(), productId: z.string().uuid().nullable(), name: z.string(), quantity: z.number().int(),
     unitPrice: adminMoneySchema, lineTotal: adminMoneySchema,
   })),
   timeline: z.array(z.object({

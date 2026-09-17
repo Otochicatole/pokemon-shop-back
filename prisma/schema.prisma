@@ -720,7 +720,7 @@ model OrderItem {
   id              String  @id @default(uuid())
   orderId         String
   sellerOrderId   String?
-  productId       String
+  productId       String?
   sku             String
   productName     String
   productSnapshot String
@@ -730,12 +730,13 @@ model OrderItem {
   lineTotalMinor  BigInt
   order           Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   sellerOrder     SellerOrder? @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
-  product         Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  product         Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
   refundLines     RefundLine[]
 
   @@index([orderId])
   @@index([imageFileId])
   @@index([sellerOrderId])
+  @@index([productId])
 }
 
 model InventoryReservation {
