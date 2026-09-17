@@ -253,6 +253,33 @@ export type SupplierDto = {
 export type SupplierDetailDto = { supplier: SupplierDto };
 export type SupplierActiveMutationDto = { id: string; active: boolean; version: number };
 
+export type SupplierPurchaseItemProductDto = {
+  id: string;
+  sku: string;
+  slug: string;
+  name: string;
+  description: string;
+  kind: string;
+  stockMode: string;
+  status: string;
+  price: MoneyDto;
+  imageUrl: string | null;
+  pokemonCard: {
+    pokemonType: string | null;
+    setName: string;
+    setCode: string | null;
+    cardNumber: string;
+    rarity: string;
+    language: string;
+    condition: string;
+    finish: string | null;
+    edition: string | null;
+    gradingCompany: string | null;
+    grade: string | null;
+    certificationNumber: string | null;
+  } | null;
+};
+
 export type SupplierPurchaseItemDto = {
   id: string;
   productId: string | null;
@@ -261,6 +288,7 @@ export type SupplierPurchaseItemDto = {
   quantity: number;
   unitCost: MoneyDto;
   lineTotal: MoneyDto;
+  product?: SupplierPurchaseItemProductDto | null;
 };
 
 export type SupplierPurchaseDto = {
@@ -272,6 +300,7 @@ export type SupplierPurchaseDto = {
   totalCost: MoneyDto;
   createdAt: Date;
   updatedAt: Date;
+  createdBy?: { id: string; name: string | null; email: string } | null;
   items: SupplierPurchaseItemDto[];
 };
 

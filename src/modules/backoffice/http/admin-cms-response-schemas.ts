@@ -179,6 +179,33 @@ export const adminSupplierSchema = z.object({
 export const adminSupplierDetailDataSchema = z.object({ supplier: adminSupplierSchema });
 export const adminSupplierActiveMutationDataSchema = z.object({ id: z.string().uuid(), active: z.boolean(), version: z.number().int() });
 
+export const adminSupplierPurchaseItemProductSchema = z.object({
+  id: z.string().uuid(),
+  sku: z.string(),
+  slug: z.string(),
+  name: z.string(),
+  description: z.string(),
+  kind: z.string(),
+  stockMode: z.string(),
+  status: z.string(),
+  price: adminMoneySchema,
+  imageUrl: z.string().nullable(),
+  pokemonCard: z.object({
+    pokemonType: z.string().nullable(),
+    setName: z.string(),
+    setCode: z.string().nullable(),
+    cardNumber: z.string(),
+    rarity: z.string(),
+    language: z.string(),
+    condition: z.string(),
+    finish: z.string().nullable(),
+    edition: z.string().nullable(),
+    gradingCompany: z.string().nullable(),
+    grade: z.string().nullable(),
+    certificationNumber: z.string().nullable(),
+  }).nullable(),
+}).nullable().optional();
+
 export const adminSupplierPurchaseItemSchema = z.object({
   id: z.string().uuid(),
   productId: z.string().uuid().nullable(),
@@ -187,6 +214,7 @@ export const adminSupplierPurchaseItemSchema = z.object({
   quantity: z.number().int(),
   unitCost: adminMoneySchema,
   lineTotal: adminMoneySchema,
+  product: adminSupplierPurchaseItemProductSchema,
 });
 export const adminSupplierPurchaseSchema = z.object({
   id: z.string().uuid(),
@@ -197,6 +225,7 @@ export const adminSupplierPurchaseSchema = z.object({
   totalCost: adminMoneySchema,
   createdAt: dateTime,
   updatedAt: dateTime,
+  createdBy: z.object({ id: z.string().uuid(), name: z.string().nullable(), email: z.string().email() }).nullable().optional(),
   items: z.array(adminSupplierPurchaseItemSchema),
 });
 export const adminSupplierPurchaseDetailDataSchema = z.object({ purchase: adminSupplierPurchaseSchema });

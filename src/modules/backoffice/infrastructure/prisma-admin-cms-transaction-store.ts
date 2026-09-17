@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { badRequest, conflict, notFound } from '../../../shared/errors.js';
 import { parseMinor } from '../../../shared/money.js';
 import type { PickupPointWrite, ShippingZoneWrite } from '../application/ports.js';
-import type { JsonValue, NewsDto, OrderDto, OrderStatusMutationDto, RefundDto, SupplierDto, SupplierPurchaseDto, TransferReviewDto } from '../application/dtos.js';
+import type { JsonValue, NewsDto, OrderDto, OrderStatusMutationDto, RefundDto, SupplierDto, SupplierPurchaseDto, SupplierPurchaseItemDto, TransferReviewDto } from '../application/dtos.js';
 import type {
   AdminActor, AuditListQuery, CustomerListQuery, OrderListQuery, OrderStatusValue,
   ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierPurchaseWrite, SupplierWrite, LoyaltyProgramWrite, TransferSettingsWrite, NewsListQuery, NewsPatch, NewsWrite,
@@ -86,17 +86,69 @@ function mapSupplier(value: { id: string; name: string; contactName: string | nu
 }
 
 type SupplierPurchaseRecord = Prisma.SupplierPurchaseGetPayload<{ include: { items: true } }>;
+type SupplierPurchaseDetailRecord = Prisma.SupplierPurchaseGetPayload<{
+  include: {
+    createdBy: { select: { id: true; name: true; email: true } };
+    items: {
+      include: {
+        product: {
+          include: {
+            pokemonCard: true;
+            images: true;
+          };
+        };
+      };
+    };
+  };
+}>;
 
-function mapSupplierPurchase(value: SupplierPurchaseRecord): SupplierPurchaseDto {
-  const items = value.items.map((item) => ({
-    id: item.id,
-    productId: item.productId,
-    productSku: item.productSku,
-    productName: item.productName,
-    quantity: item.quantity,
-    unitCost: money(item.unitCostMinor, (item.currency as BaseCurrency) || BASE_CURRENCY),
-    lineTotal: money(item.lineTotalMinor, (item.currency as BaseCurrency) || BASE_CURRENCY),
-  }));
+function mapPurchaseItemProduct(product: NonNullable<SupplierPurchaseDetailRecord['items'][number]['product']>): NonNullable<SupplierPurchaseItemDto['product']> {
+  const image = product.images[0];
+  return {
+    id: product.id,
+    sku: product.sku,
+    slug: product.slug,
+    name: product.name,
+    description: product.description,
+    kind: product.kind,
+    stockMode: product.stockMode,
+    status: product.status,
+    price: money(product.priceMinor, (product.currency as BaseCurrency) || BASE_CURRENCY),
+    imageUrl: image ? `/media/public/${image.fileId}` : null,
+    pokemonCard: product.pokemonCard ? {
+      pokemonType: product.pokemonCard.pokemonType,
+      setName: product.pokemonCard.setName,
+      setCode: product.pokemonCard.setCode,
+      cardNumber: product.pokemonCard.cardNumber,
+      rarity: product.pokemonCard.rarity,
+      language: product.pokemonCard.language,
+      condition: product.pokemonCard.condition,
+      finish: product.pokemonCard.finish,
+      edition: product.pokemonCard.edition,
+      gradingCompany: product.pokemonCard.gradingCompany,
+      grade: product.pokemonCard.grade,
+      certificationNumber: product.pokemonCard.certificationNumber,
+    } : null,
+  };
+}
+
+function mapSupplierPurchase(value: SupplierPurchaseRecord | SupplierPurchaseDetailRecord): SupplierPurchaseDto {
+  const detail = 'createdBy' in value ? value as SupplierPurchaseDetailRecord : null;
+  const items = value.items.map((item) => {
+    const base = {
+      id: item.id,
+      productId: item.productId,
+      productSku: item.productSku,
+      productName: item.productName,
+      quantity: item.quantity,
+      unitCost: money(item.unitCostMinor, (item.currency as BaseCurrency) || BASE_CURRENCY),
+      lineTotal: money(item.lineTotalMinor, (item.currency as BaseCurrency) || BASE_CURRENCY),
+    };
+    if (detail && 'product' in item) {
+      return { ...base, product: item.product ? mapPurchaseItemProduct(item.product) : null };
+    }
+    return base;
+  });
   const totalCostMinor = value.items.reduce((sum, item) => sum + item.lineTotalMinor, 0n);
   return {
     id: value.id,
@@ -107,6 +159,7 @@ function mapSupplierPurchase(value: SupplierPurchaseRecord): SupplierPurchaseDto
     totalCost: money(totalCostMinor),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
+    ...(detail ? { createdBy: detail.createdBy } : {}),
     items,
   };
 }
@@ -640,7 +693,23 @@ export class PrismaAdminCmsTransactionStore {
   async getSupplierPurchase(supplierId: string, purchaseId: string) {
     const purchase = await this.prisma.supplierPurchase.findFirst({
       where: { id: purchaseId, supplierId },
-      include: { items: true },
+      include: {
+        createdBy: { select: { id: true, name: true, email: true } },
+        items: {
+          include: {
+            product: {
+              include: {
+                pokemonCard: true,
+                images: {
+                  where: { retiredAt: null },
+                  orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+                  take: 1,
+                },
+              },
+            },
+          },
+        },
+      },
     });
     if (!purchase) throw notFound('Supplier purchase not found');
     return { purchase: mapSupplierPurchase(purchase) };
