@@ -111,7 +111,7 @@ export function createApp(composition = createCompositionRoot()): Express {
       const path = first?.path?.join('.') ?? '';
       const label = fieldLabels[path] ?? fieldLabels[path.replace(/\[\d+\]/g, '')] ?? (path || 'un campo');
       const tooSmall = first?.code === 'too_small';
-      const invalidUuid = first?.code === 'invalid_string' && (first as { validation?: string }).validation === 'uuid';
+      const invalidUuid = first?.code === 'invalid_format' && (first as { format?: string }).format === 'uuid';
       const detail = tooSmall
         ? `Revisá ${label}: el valor es demasiado corto o está incompleto`
         : invalidUuid

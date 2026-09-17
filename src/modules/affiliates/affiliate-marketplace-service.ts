@@ -259,7 +259,7 @@ export async function recordAffiliateRefund(tx: Db, args: { sellerOrderId: strin
     const lines: Array<{ orderItemId: string; quantity: number }> = args.lines?.length ? args.lines.map((line) => ({ orderItemId: line.orderItemId, quantity: line.quantity })) : (await tx.orderItem.findMany({ where: { sellerOrderId: sellerOrder.id }, select: { id: true, quantity: true } })).map((item) => ({ orderItemId: item.id, quantity: item.quantity }));
     for (const line of lines) {
       const item = await tx.orderItem.findUnique({ where: { id: line.orderItemId } });
-      if (!item) continue;
+      if (!item?.productId) continue;
       await tx.inventory.update({ where: { productId: item.productId }, data: { onHand: { increment: line.quantity } } });
       await tx.inventoryAdjustment.create({ data: { productId: item.productId, delta: line.quantity, reason: `Refund restock ${refund.id}`, createdById: args.createdById } });
     }
