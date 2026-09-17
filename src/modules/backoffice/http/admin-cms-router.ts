@@ -11,7 +11,7 @@ import {
   orderActionSchema, orderListQuerySchema, orderParamsSchema, orderTransitionSchema, paymentsQuerySchema,
   pickupPointWriteSchema, productImageParamsSchema, productListQuerySchema, productPatchSchema,
   productWriteSchema, refundSchema, shippingZoneWriteSchema, supplierActiveSchema, supplierListQuerySchema,
-  supplierPatchSchema, supplierWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
+  supplierPatchSchema, supplierPurchaseParamsSchema, supplierPurchaseWriteSchema, supplierWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
   loyaltyProgramWriteSchema, transferSettingsWriteSchema, tcgdexCardParamsSchema, tcgdexImageImportSchema, tcgdexSearchQuerySchema,
   newsListQuerySchema, newsWriteSchema, newsPatchSchema,
 } from './admin-cms-schemas.js';
@@ -151,6 +151,24 @@ export function createAdminCmsRouter({ application, upload, requireAdmin, actorF
   router.patch('/suppliers/:id/active', async (req, res) => {
     const input = supplierActiveSchema.parse(req.body);
     return res.json(await application.suppliers.setActive(actorFromRequest(req), idParamsSchema.parse(req.params).id, input.active, input.expectedVersion));
+  });
+  router.get('/suppliers/:id/purchases', async (req, res) => {
+    const supplierId = idParamsSchema.parse(req.params).id;
+    const query = cursorQuerySchema.parse(req.query);
+    return res.json(await application.suppliers.listPurchases(supplierId, query.cursor, query.limit));
+  });
+  router.get('/suppliers/:id/purchases/:purchaseId', async (req, res) => {
+    const params = supplierPurchaseParamsSchema.parse(req.params);
+    return res.json(await application.suppliers.getPurchase(params.id, params.purchaseId));
+  });
+  router.post('/suppliers/:id/purchases', async (req, res) => {
+    const supplierId = idParamsSchema.parse(req.params).id;
+    return res.status(201).json(await application.suppliers.createPurchase(actorFromRequest(req), supplierId, supplierPurchaseWriteSchema.parse(req.body)));
+  });
+  router.delete('/suppliers/:id/purchases/:purchaseId', async (req, res) => {
+    const params = supplierPurchaseParamsSchema.parse(req.params);
+    await application.suppliers.deletePurchase(actorFromRequest(req), params.id, params.purchaseId);
+    return noContent(res);
   });
 
   router.get('/news', async (req, res) => res.json(await application.news.list(newsListQuerySchema.parse(req.query))));

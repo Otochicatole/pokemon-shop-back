@@ -4,13 +4,13 @@ import type {
   OrderDto, OrderStatusMutationDto, PickupPointResultDto, ProductDetailDto, ProductDto,
   ProductImageOrderDto, ProductImagesDto, ProductImageUpdateDto, ProductStatusDto, RefundDto,
   ShippingZoneResultDto, TransferReviewDto,
-  SupplierActiveMutationDto, SupplierDetailDto, SupplierDto,
+  SupplierActiveMutationDto, SupplierDetailDto, SupplierDto, SupplierPurchaseDetailDto, SupplierPurchaseDto,
   LoyaltyProgramDto, TransferSettingsDto,
   NewsDetailDto, NewsDto,
 } from './dtos.js';
 import type {
   AdminActor, AuditListQuery, CustomerListQuery, OrderListQuery, OrderStatusValue,
-  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierWrite,
+  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierPurchaseWrite, SupplierWrite,
   LoyaltyProgramWrite, TransferSettingsWrite,
   NewsListQuery, NewsPatch, NewsWrite,
 } from '../domain/admin-cms.js';
@@ -80,6 +80,10 @@ export interface SupplierAdminRepository {
   createSupplier(actor: AdminActor, input: SupplierWrite): Promise<SupplierDetailDto>;
   updateSupplier(actor: AdminActor, id: string, input: SupplierPatch): Promise<SupplierDetailDto>;
   setSupplierActive(actor: AdminActor, id: string, active: boolean, expectedVersion: number): Promise<SupplierActiveMutationDto>;
+  listSupplierPurchases(supplierId: string, cursor: string | undefined, limit: number): Promise<CursorPageDto<SupplierPurchaseDto>>;
+  getSupplierPurchase(supplierId: string, purchaseId: string): Promise<SupplierPurchaseDetailDto>;
+  createSupplierPurchase(actor: AdminActor, supplierId: string, input: SupplierPurchaseWrite): Promise<SupplierPurchaseDetailDto>;
+  deleteSupplierPurchase(actor: AdminActor, supplierId: string, purchaseId: string): Promise<void>;
 }
 
 export interface LoyaltyAdminRepository {

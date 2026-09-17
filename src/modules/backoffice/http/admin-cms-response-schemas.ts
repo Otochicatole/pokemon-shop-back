@@ -179,6 +179,28 @@ export const adminSupplierSchema = z.object({
 export const adminSupplierDetailDataSchema = z.object({ supplier: adminSupplierSchema });
 export const adminSupplierActiveMutationDataSchema = z.object({ id: z.string().uuid(), active: z.boolean(), version: z.number().int() });
 
+export const adminSupplierPurchaseItemSchema = z.object({
+  id: z.string().uuid(),
+  productId: z.string().uuid().nullable(),
+  productSku: z.string(),
+  productName: z.string(),
+  quantity: z.number().int(),
+  unitCost: adminMoneySchema,
+  lineTotal: adminMoneySchema,
+});
+export const adminSupplierPurchaseSchema = z.object({
+  id: z.string().uuid(),
+  supplierId: z.string().uuid(),
+  purchasedAt: dateTime,
+  note: z.string().nullable(),
+  itemCount: z.number().int(),
+  totalCost: adminMoneySchema,
+  createdAt: dateTime,
+  updatedAt: dateTime,
+  items: z.array(adminSupplierPurchaseItemSchema),
+});
+export const adminSupplierPurchaseDetailDataSchema = z.object({ purchase: adminSupplierPurchaseSchema });
+
 export const adminNewsSchema = z.object({
   id: z.string().uuid(), title: z.string(), summary: z.string(),
   coverFileId: z.string().uuid().nullable(), coverUrl: z.string().nullable(),

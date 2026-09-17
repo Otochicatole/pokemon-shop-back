@@ -344,6 +344,7 @@ model Admin {
   affiliateIssueResolutions AffiliateIssue[] @relation("AffiliateIssueResolutions")
   affiliateCancellationResolutions AffiliateCancellationRequest[] @relation("AffiliateCancellationResolutions")
   affiliateProgramUpdates AffiliateProgramSettings[]
+  supplierPurchases     SupplierPurchase[]
 }
 
 model LoyaltyProgram {
@@ -442,20 +443,54 @@ model AdminRecoveryCode {
 }
 
 model Supplier {
-  id          String   @id @default(uuid())
+  id          String             @id @default(uuid())
   name        String
   contactName String?
   email       String?
   phone       String?
   address     String?
   notes       String?
-  active      Boolean  @default(true)
-  version     Int      @default(1)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  active      Boolean            @default(true)
+  version     Int                @default(1)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  purchases   SupplierPurchase[]
 
   @@index([active, name])
   @@index([updatedAt])
+}
+
+model SupplierPurchase {
+  id          String                 @id @default(uuid())
+  supplierId  String
+  purchasedAt DateTime
+  note        String?
+  createdById String?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  supplier    Supplier               @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  createdBy   Admin?                 @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  items       SupplierPurchaseItem[]
+
+  @@index([supplierId, purchasedAt])
+  @@index([createdById])
+}
+
+model SupplierPurchaseItem {
+  id             String           @id @default(uuid())
+  purchaseId     String
+  productId      String?
+  productSku     String
+  productName    String
+  quantity       Int
+  unitCostMinor  BigInt
+  currency       String           @default("USD")
+  lineTotalMinor BigInt
+  purchase       SupplierPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  product        Product?         @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([purchaseId])
+  @@index([productId])
 }
 
 model Affiliate {
@@ -543,6 +578,7 @@ model Product {
   orderItems    OrderItem[]
   inventoryLogs InventoryAdjustment[]
   reservations  InventoryReservation[]
+  supplierPurchaseItems SupplierPurchaseItem[]
   affiliate     Affiliate?              @relation(fields: [affiliateId], references: [id], onDelete: SetNull)
   affiliateListing AffiliateListing?
 

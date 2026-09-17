@@ -97,6 +97,22 @@ export const supplierWriteSchema = z.object({
 export const supplierPatchSchema = supplierWriteSchema.partial().extend({ expectedVersion: z.number().int().min(1) });
 export const supplierActiveSchema = activeSchema.extend({ expectedVersion: z.number().int().min(1) });
 export const supplierListQuerySchema = cursorQuery.extend({ search: optionalText(180), active: booleanQuery });
+export const supplierPurchaseParamsSchema = z.object({ id: z.string().uuid(), purchaseId: z.string().uuid() });
+export const supplierPurchaseItemWriteSchema = z.object({
+  productId: z.string().uuid().optional(),
+  product: productWriteSchema.optional(),
+  quantity: z.number().int().min(1).max(1_000_000),
+  unitCostMinor: z.string().regex(/^\d+$/),
+}).superRefine((value, context) => {
+  if (!value.productId && !value.product) {
+    context.addIssue({ code: 'custom', path: ['product'], message: 'Indicá un producto existente o completá los datos del producto nuevo' });
+  }
+});
+export const supplierPurchaseWriteSchema = z.object({
+  purchasedAt: z.coerce.date(),
+  note: supplierOptionalText(2000),
+  items: z.array(supplierPurchaseItemWriteSchema).min(1).max(100),
+});
 const nullableNewsDate = z.preprocess(
   (value) => value === '' || value === undefined ? null : value,
   z.coerce.date().nullable(),

@@ -253,6 +253,30 @@ export type SupplierDto = {
 export type SupplierDetailDto = { supplier: SupplierDto };
 export type SupplierActiveMutationDto = { id: string; active: boolean; version: number };
 
+export type SupplierPurchaseItemDto = {
+  id: string;
+  productId: string | null;
+  productSku: string;
+  productName: string;
+  quantity: number;
+  unitCost: MoneyDto;
+  lineTotal: MoneyDto;
+};
+
+export type SupplierPurchaseDto = {
+  id: string;
+  supplierId: string;
+  purchasedAt: Date;
+  note: string | null;
+  itemCount: number;
+  totalCost: MoneyDto;
+  createdAt: Date;
+  updatedAt: Date;
+  items: SupplierPurchaseItemDto[];
+};
+
+export type SupplierPurchaseDetailDto = { purchase: SupplierPurchaseDto };
+
 export type NewsDto = {
   id: string;
   title: string;

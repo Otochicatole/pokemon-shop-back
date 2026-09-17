@@ -111,6 +111,16 @@ export type OrderListQuery = CursorPage & {
 export type CustomerListQuery = CursorPage & { search?: string; status?: 'ACTIVE' | 'SUSPENDED'; verified?: boolean };
 export type AuditListQuery = CursorPage & { actorId?: string; action?: string; entityType?: string; requestId?: string; from?: Date; to?: Date };
 export type SupplierListQuery = CursorPage & { search?: string; active?: boolean };
+export type SupplierPurchaseWrite = {
+  purchasedAt: Date;
+  note?: string | null;
+  items: Array<{
+    productId?: string;
+    product?: ProductWrite;
+    quantity: number;
+    unitCostMinor: string;
+  }>;
+};
 export type NewsListQuery = CursorPage & { search?: string; active?: boolean };
 
 export const allowedOrderTransitions: Readonly<Record<OrderStatusValue, readonly OrderStatusValue[]>> = {

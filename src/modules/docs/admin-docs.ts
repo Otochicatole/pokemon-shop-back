@@ -6,7 +6,7 @@ import {
   loyaltyProgramWriteSchema, transferSettingsWriteSchema, orderActionSchema, orderListQuerySchema, orderParamsSchema, orderTransitionSchema, paymentsQuerySchema,
   pickupPointWriteSchema, productImageParamsSchema, productListQuerySchema, productPatchSchema,
   productWriteSchema, refundSchema, shippingZoneWriteSchema, supplierActiveSchema, supplierListQuerySchema,
-  supplierPatchSchema, supplierWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
+  supplierPatchSchema, supplierPurchaseParamsSchema, supplierPurchaseWriteSchema, supplierWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
   tcgdexCardParamsSchema, tcgdexImageImportSchema, tcgdexSearchQuerySchema,
   newsListQuerySchema, newsWriteSchema, newsPatchSchema,
   adminActiveMutationDataSchema, adminAuditEntrySchema, adminCustomerDetailDataSchema, adminCustomerSummarySchema,
@@ -15,7 +15,7 @@ import {
   adminOrderStatusDataSchema, adminPickupPointResultDataSchema, adminProductDetailDataSchema, adminProductImageOrderDataSchema,
   adminProductImagesDataSchema, adminProductImageUpdateDataSchema, adminProductSchema, adminProductStatusDataSchema,
   adminShippingZoneResultDataSchema, adminTransferReviewDataSchema,
-  adminSupplierActiveMutationDataSchema, adminSupplierDetailDataSchema, adminSupplierSchema, adminTcgdexCardDataSchema, adminTransferSettingsSchema,
+  adminSupplierActiveMutationDataSchema, adminSupplierDetailDataSchema, adminSupplierPurchaseDetailDataSchema, adminSupplierPurchaseSchema, adminSupplierSchema, adminTcgdexCardDataSchema, adminTransferSettingsSchema,
   adminTcgdexCardSummarySchema, adminNewsSchema, adminNewsDetailDataSchema,
 } from '../backoffice/index.js';
 
@@ -45,6 +45,8 @@ export function registerAdminCmsPaths(registry: OpenAPIRegistry, { problemSchema
   registry.register('AdminPickupPointWrite', pickupPointWriteSchema);
   registry.register('AdminSupplierWrite', supplierWriteSchema);
   registry.register('AdminSupplierPatch', supplierPatchSchema);
+  registry.register('AdminSupplierPurchase', adminSupplierPurchaseSchema);
+  registry.register('AdminSupplierPurchaseWrite', supplierPurchaseWriteSchema);
   registry.register('AdminLoyaltyProgramWrite', loyaltyProgramWriteSchema);
   registry.register('AdminLoyaltyProgram', adminLoyaltyProgramSchema);
   registry.register('AdminTransferSettings', adminTransferSettingsSchema);
@@ -124,6 +126,10 @@ export function registerAdminCmsPaths(registry: OpenAPIRegistry, { problemSchema
   registry.registerPath({ method: 'post', path: '/api/v2/admin/suppliers', tags: ['Admin suppliers'], summary: 'Create an active supplier', security, request: { headers: csrf, body: json(supplierWriteSchema) }, responses: created('Supplier created', adminSupplierDetailDataSchema) });
   registry.registerPath({ method: 'patch', path: '/api/v2/admin/suppliers/{id}', tags: ['Admin suppliers'], summary: 'Edit a supplier using optimistic concurrency', security, request: { params: idParamsSchema, headers: csrf, body: json(supplierPatchSchema) }, responses: ok('Supplier updated', adminSupplierDetailDataSchema) });
   registry.registerPath({ method: 'patch', path: '/api/v2/admin/suppliers/{id}/active', tags: ['Admin suppliers'], summary: 'Activate or deactivate a supplier without deleting history', security, request: { params: idParamsSchema, headers: csrf, body: json(supplierActiveSchema) }, responses: ok('Supplier availability changed', adminSupplierActiveMutationDataSchema) });
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/suppliers/{id}/purchases', tags: ['Admin suppliers'], summary: 'List purchase history for a supplier', security, request: { params: idParamsSchema, query: cursorQuerySchema }, responses: ok('Cursor page of supplier purchases', z.array(adminSupplierPurchaseSchema)) });
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/suppliers/{id}/purchases/{purchaseId}', tags: ['Admin suppliers'], summary: 'Read a supplier purchase with line items', security, request: { params: supplierPurchaseParamsSchema }, responses: ok('Supplier purchase detail', adminSupplierPurchaseDetailDataSchema) });
+  registry.registerPath({ method: 'post', path: '/api/v2/admin/suppliers/{id}/purchases', tags: ['Admin suppliers'], summary: 'Register a purchase from a supplier without changing inventory', security, request: { params: idParamsSchema, headers: csrf, body: json(supplierPurchaseWriteSchema) }, responses: created('Supplier purchase created', adminSupplierPurchaseDetailDataSchema) });
+  registry.registerPath({ method: 'delete', path: '/api/v2/admin/suppliers/{id}/purchases/{purchaseId}', tags: ['Admin suppliers'], summary: 'Delete a supplier purchase from history', security, request: { params: supplierPurchaseParamsSchema, headers: csrf }, responses: { 204: { description: 'Supplier purchase deleted' }, ...errors } });
 
   registry.registerPath({ method: 'get', path: '/api/v2/admin/news', tags: ['Admin news'], summary: 'List all news items and publication states', security, request: { query: newsListQuerySchema }, responses: ok('Cursor page of news items', z.array(adminNewsSchema)) });
   registry.registerPath({ method: 'get', path: '/api/v2/admin/news/{id}', tags: ['Admin news'], summary: 'Read an administrative news item', security, request: { params: idParamsSchema }, responses: ok('News item detail', adminNewsDetailDataSchema) });

@@ -2,10 +2,10 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 import { badRequest, conflict, notFound } from '../../../shared/errors.js';
 import { parseMinor } from '../../../shared/money.js';
 import type { PickupPointWrite, ShippingZoneWrite } from '../application/ports.js';
-import type { JsonValue, NewsDto, OrderDto, OrderStatusMutationDto, RefundDto, SupplierDto, TransferReviewDto } from '../application/dtos.js';
+import type { JsonValue, NewsDto, OrderDto, OrderStatusMutationDto, RefundDto, SupplierDto, SupplierPurchaseDto, TransferReviewDto } from '../application/dtos.js';
 import type {
   AdminActor, AuditListQuery, CustomerListQuery, OrderListQuery, OrderStatusValue,
-  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierWrite, LoyaltyProgramWrite, TransferSettingsWrite, NewsListQuery, NewsPatch, NewsWrite,
+  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierPurchaseWrite, SupplierWrite, LoyaltyProgramWrite, TransferSettingsWrite, NewsListQuery, NewsPatch, NewsWrite,
 } from '../domain/admin-cms.js';
 import { allowedOrderTransitions } from '../domain/admin-cms.js';
 import { getLoyaltyProgram, mapLoyaltyProgram, releaseOrderLoyaltyReservation, reverseOrderLoyalty, settleOrderLoyalty } from '../../loyalty/index.js';
@@ -82,6 +82,32 @@ function mapSupplier(value: { id: string; name: string; contactName: string | nu
     id: value.id, name: value.name, contactName: value.contactName, email: value.email,
     phone: value.phone, address: value.address, notes: value.notes, active: value.active,
     version: value.version, createdAt: value.createdAt, updatedAt: value.updatedAt,
+  };
+}
+
+type SupplierPurchaseRecord = Prisma.SupplierPurchaseGetPayload<{ include: { items: true } }>;
+
+function mapSupplierPurchase(value: SupplierPurchaseRecord): SupplierPurchaseDto {
+  const items = value.items.map((item) => ({
+    id: item.id,
+    productId: item.productId,
+    productSku: item.productSku,
+    productName: item.productName,
+    quantity: item.quantity,
+    unitCost: money(item.unitCostMinor, (item.currency as BaseCurrency) || BASE_CURRENCY),
+    lineTotal: money(item.lineTotalMinor, (item.currency as BaseCurrency) || BASE_CURRENCY),
+  }));
+  const totalCostMinor = value.items.reduce((sum, item) => sum + item.lineTotalMinor, 0n);
+  return {
+    id: value.id,
+    supplierId: value.supplierId,
+    purchasedAt: value.purchasedAt,
+    note: value.note,
+    itemCount: items.length,
+    totalCost: money(totalCostMinor),
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+    items,
   };
 }
 
@@ -594,6 +620,120 @@ export class PrismaAdminCmsTransactionStore {
       if (changed.count !== 1) throw conflict('SUPPLIER_CHANGED', 'Supplier was modified by another administrator');
       await tx.auditLog.create({ data: auditData(actor, active ? 'SUPPLIER_REACTIVATED' : 'SUPPLIER_DEACTIVATED', 'Supplier', id) });
       return { id, active, version: expectedVersion + 1 };
+    }));
+  }
+
+  async listSupplierPurchases(supplierId: string, cursor: string | undefined, limit: number) {
+    const supplier = await this.prisma.supplier.findUnique({ where: { id: supplierId }, select: { id: true } });
+    if (!supplier) throw notFound('Supplier not found');
+    const rows = await this.prisma.supplierPurchase.findMany({
+      where: { supplierId },
+      include: { items: true },
+      orderBy: [{ purchasedAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+    });
+    const result = page(rows, limit, (value) => value.id);
+    return { data: result.data.map(mapSupplierPurchase), nextCursor: result.nextCursor };
+  }
+
+  async getSupplierPurchase(supplierId: string, purchaseId: string) {
+    const purchase = await this.prisma.supplierPurchase.findFirst({
+      where: { id: purchaseId, supplierId },
+      include: { items: true },
+    });
+    if (!purchase) throw notFound('Supplier purchase not found');
+    return { purchase: mapSupplierPurchase(purchase) };
+  }
+
+  createSupplierPurchase(actor: AdminActor, supplierId: string, input: SupplierPurchaseWrite) {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const supplier = await tx.supplier.findUnique({ where: { id: supplierId }, select: { id: true } });
+      if (!supplier) throw notFound('Supplier not found');
+
+      const lines: Array<{
+        productId: string;
+        productSku: string;
+        productName: string;
+        quantity: number;
+        unitCostMinor: bigint;
+        currency: string;
+        lineTotalMinor: bigint;
+      }> = [];
+
+      for (const item of input.items) {
+        let product: { id: string; sku: string; name: string };
+        if (item.productId) {
+          const existing = await tx.product.findUnique({ where: { id: item.productId }, select: { id: true, sku: true, name: true } });
+          if (!existing) throw badRequest('PRODUCT_NOT_FOUND', 'Uno o más productos no existen');
+          product = existing;
+        } else if (item.product) {
+          // Purchase history must not change stock: always create with initialStock 0.
+          const write = { ...item.product, initialStock: 0 };
+          validateProduct(write);
+          const created = await tx.product.create({
+            data: {
+              sku: write.sku.toUpperCase(),
+              slug: write.slug,
+              name: write.name,
+              description: write.description,
+              kind: write.kind,
+              stockMode: write.stockMode,
+              priceMinor: parseMinor(write.priceMinor),
+              currency: BASE_CURRENCY,
+              inventory: { create: { onHand: 0, reserved: 0 } },
+              ...(write.pokemonCard ? { pokemonCard: { create: mapCardWrite(write.pokemonCard) } } : {}),
+            },
+            select: { id: true, sku: true, name: true },
+          });
+          await tx.auditLog.create({
+            data: auditData(actor, 'PRODUCT_CREATED', 'Product', created.id, { sku: created.sku, via: 'SUPPLIER_PURCHASE', supplierId }),
+          });
+          product = created;
+        } else {
+          throw badRequest('PRODUCT_REQUIRED', 'Cada línea necesita un producto existente o datos de producto nuevo');
+        }
+
+        const unitCostMinor = parseMinor(item.unitCostMinor);
+        const lineTotalMinor = unitCostMinor * BigInt(item.quantity);
+        lines.push({
+          productId: product.id,
+          productSku: product.sku,
+          productName: product.name,
+          quantity: item.quantity,
+          unitCostMinor,
+          currency: BASE_CURRENCY,
+          lineTotalMinor,
+        });
+      }
+
+      const purchase = await tx.supplierPurchase.create({
+        data: {
+          supplierId,
+          purchasedAt: input.purchasedAt,
+          note: cleanOptional(input.note) ?? null,
+          createdById: actor.adminId,
+          items: { create: lines },
+        },
+        include: { items: true },
+      });
+      await tx.auditLog.create({
+        data: auditData(actor, 'SUPPLIER_PURCHASE_CREATED', 'SupplierPurchase', purchase.id, {
+          supplierId,
+          itemCount: lines.length,
+          totalCostMinor: lines.reduce((sum, line) => sum + line.lineTotalMinor, 0n).toString(),
+        }),
+      });
+      return { purchase: mapSupplierPurchase(purchase) };
+    })).catch(throwCmsWriteError);
+  }
+
+  deleteSupplierPurchase(actor: AdminActor, supplierId: string, purchaseId: string): Promise<void> {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const existing = await tx.supplierPurchase.findFirst({ where: { id: purchaseId, supplierId }, select: { id: true } });
+      if (!existing) throw notFound('Supplier purchase not found');
+      await tx.supplierPurchase.delete({ where: { id: purchaseId } });
+      await tx.auditLog.create({ data: auditData(actor, 'SUPPLIER_PURCHASE_DELETED', 'SupplierPurchase', purchaseId, { supplierId }) });
     }));
   }
 
