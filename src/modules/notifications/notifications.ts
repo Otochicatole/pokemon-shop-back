@@ -109,6 +109,23 @@ export function createSellerOrderStatusNotification(db: NotificationDb, sellerOr
   });
 }
 
+/** Buyer-facing notice when a marketplace suborder (store or affiliate) changes status. */
+export function createBuyerSellerOrderStatusNotification(
+  db: NotificationDb,
+  order: { id: string; number: string; userId: string },
+  sellerOrderId: string,
+  status: string,
+  sourceKey: string,
+) {
+  return createUserNotification(db, order.userId, {
+    type: NotificationType.ORDER_STATUS_CHANGED,
+    title: 'Actualización de tu orden',
+    message: `La orden ${order.number} ahora está ${statusLabel(status)}.`,
+    dedupeKey: `buyer-seller-order-status:${sellerOrderId}:${sourceKey}:user:${order.userId}`,
+    orderId: order.id,
+  });
+}
+
 export function createSellerOrderAdminNotifications(db: NotificationDb, sellerOrder: { id: string; orderNumber: string }, type: NotificationType, title: string, message: string, sourceKey: string) {
   return createAdminNotifications(db, {
     type,

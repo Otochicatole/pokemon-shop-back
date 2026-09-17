@@ -12,7 +12,7 @@ import { discardUnattachedFile, saveImage } from '../media/index.js';
 import { BASE_CURRENCY } from '../../shared/currency.js';
 import { getCard, searchCards } from '../tcgdex/index.js';
 import { affiliateBalance, requestSellerCancellation, refundSellerOrder, resolveAffiliateIssue, resolveCancellation, sellerOrderAllowedActions, transitionSellerOrder } from './affiliate-marketplace-service.js';
-import { createAdminNotifications, createAffiliateListingNotification, createAffiliatePayoutNotification, createSellerOrderAdminNotifications, createSellerOrderStatusNotification, publishNotifications } from '../notifications/index.js';
+import { createAdminNotifications, createAffiliateListingNotification, createAffiliatePayoutNotification, createBuyerSellerOrderStatusNotification, createSellerOrderAdminNotifications, createSellerOrderStatusNotification, publishNotifications } from '../notifications/index.js';
 import type { SupportRealtimeHub } from '../support/support-realtime.js';
 
 const versionSchema = z.object({ expectedVersion: z.coerce.number().int().min(1) });
@@ -485,10 +485,15 @@ export function createAffiliateRouter(prisma: PrismaClient, upload: { array(fiel
     const affiliate = affiliateOrThrow(req); const input = statusSchema.parse(req.body);
     const settings = await prisma.affiliateProgramSettings.upsert({ where: { id: 'default' }, create: {}, update: {} });
     const order = await prisma.$transaction((tx) => transitionSellerOrder(tx, { sellerOrderId: String(req.params.id), expectedVersion: input.expectedVersion, nextStatus: input.status as SellerOrderStatus, actor: 'AFFILIATE', actorId: affiliate.id, note: input.note, autoCompleteDays: settings.autoCompleteDays, carrier: input.carrier, trackingCode: input.trackingCode }));
-    const context = await prisma.sellerOrder.findUniqueOrThrow({ where: { id: order.id }, include: { affiliate: true, order: { select: { number: true } } } });
-    const userNotice = context.affiliate ? await createSellerOrderStatusNotification(prisma, { id: context.id, orderNumber: context.order.number, affiliateUserId: context.affiliate.userId }, context.status, String(context.version)) : null;
+    const context = await prisma.sellerOrder.findUniqueOrThrow({ where: { id: order.id }, include: { affiliate: true, order: { select: { id: true, number: true, userId: true } } } });
+    const noticeIds: string[] = [
+      (await createBuyerSellerOrderStatusNotification(prisma, context.order, context.id, context.status, String(context.version))).id,
+    ];
+    if (context.affiliate) {
+      noticeIds.push((await createSellerOrderStatusNotification(prisma, { id: context.id, orderNumber: context.order.number, affiliateUserId: context.affiliate.userId }, context.status, String(context.version))).id);
+    }
     const adminNotices = await createSellerOrderAdminNotifications(prisma, { id: context.id, orderNumber: context.order.number }, NotificationType.AFFILIATE_ORDER_STATUS_CHANGED, 'Cambio en una venta de afiliado', `La venta ${context.order.number} ahora está ${context.status}.`, String(context.version));
-    if (realtime) await publishNotifications(prisma, realtime, [ ...(userNotice ? [userNotice.id] : []), ...adminNotices.map((notice) => notice.id) ]);
+    if (realtime) await publishNotifications(prisma, realtime, [ ...noticeIds, ...adminNotices.map((notice) => notice.id) ]);
     return res.json({ id: order.id, status: order.status, version: order.version, allowedActions: sellerOrderAllowedActions(order, 'AFFILIATE') });
   });
   router.post('/orders/:id/cancellation-request', async (req, res) => {
@@ -681,18 +686,28 @@ export function createAdminAffiliateRouter(prisma: PrismaClient, realtime?: Supp
     const input = versionSchema.extend({ status: z.nativeEnum(SellerOrderStatus), note: z.string().trim().min(3).max(500), carrier: z.string().trim().max(100).nullable().optional(), trackingCode: z.string().trim().max(120).nullable().optional() }).parse(req.body);
     const settings = await prisma.affiliateProgramSettings.upsert({ where: { id: 'default' }, create: {}, update: {} });
     const order = await prisma.$transaction((tx) => transitionSellerOrder(tx, { sellerOrderId: String(req.params.id), expectedVersion: input.expectedVersion, nextStatus: input.status, actor: 'ADMIN', actorId: admin.adminId, note: input.note, autoCompleteDays: settings.autoCompleteDays, carrier: input.carrier, trackingCode: input.trackingCode }));
-    const context = await prisma.sellerOrder.findUniqueOrThrow({ where: { id: order.id }, include: { affiliate: true, order: { select: { number: true } } } });
-    const notice = context.affiliate ? await createSellerOrderStatusNotification(prisma, { id: context.id, orderNumber: context.order.number, affiliateUserId: context.affiliate.userId }, context.status, `admin:${context.version}`) : null;
-    if (realtime && notice) await publishNotifications(prisma, realtime, [notice.id]);
+    const context = await prisma.sellerOrder.findUniqueOrThrow({ where: { id: order.id }, include: { affiliate: true, order: { select: { id: true, number: true, userId: true } } } });
+    const noticeIds: string[] = [
+      (await createBuyerSellerOrderStatusNotification(prisma, context.order, context.id, context.status, `admin:${context.version}`)).id,
+    ];
+    if (context.affiliate) {
+      noticeIds.push((await createSellerOrderStatusNotification(prisma, { id: context.id, orderNumber: context.order.number, affiliateUserId: context.affiliate.userId }, context.status, `admin:${context.version}`)).id);
+    }
+    if (realtime) await publishNotifications(prisma, realtime, noticeIds);
     return res.json({ id: order.id, status: order.status, version: order.version, allowedActions: sellerOrderAllowedActions(order, 'ADMIN') });
   });
   router.post('/seller-orders/:id/refund', async (req, res) => {
     const admin = currentAdmin(req); if (!admin) throw forbidden();
     const input = adminRefundSchema.parse(req.body);
     const result = await prisma.$transaction((tx) => refundSellerOrder(tx, { sellerOrderId: String(req.params.id), expectedVersion: input.expectedVersion, amountMinor: input.amountMinor, subtotalMinor: input.subtotalMinor, shippingMinor: input.shippingMinor, reason: input.reason, externalReference: input.externalReference, createdById: admin.adminId, restock: input.restock, lines: input.lines }));
-    const context = await prisma.sellerOrder.findUniqueOrThrow({ where: { id: result.order.id }, include: { affiliate: true, order: { select: { number: true } } } });
-    const notice = context.affiliate ? await createSellerOrderStatusNotification(prisma, { id: context.id, orderNumber: context.order.number, affiliateUserId: context.affiliate.userId }, context.status, `refund:${context.version}`) : null;
-    if (realtime && notice) await publishNotifications(prisma, realtime, [notice.id]);
+    const context = await prisma.sellerOrder.findUniqueOrThrow({ where: { id: result.order.id }, include: { affiliate: true, order: { select: { id: true, number: true, userId: true } } } });
+    const noticeIds: string[] = [
+      (await createBuyerSellerOrderStatusNotification(prisma, context.order, context.id, context.status, `refund:${context.version}`)).id,
+    ];
+    if (context.affiliate) {
+      noticeIds.push((await createSellerOrderStatusNotification(prisma, { id: context.id, orderNumber: context.order.number, affiliateUserId: context.affiliate.userId }, context.status, `refund:${context.version}`)).id);
+    }
+    if (realtime) await publishNotifications(prisma, realtime, noticeIds);
     return res.json({ id: result.order.id, status: result.order.status, version: result.order.version, refundId: result.refund.id, allowedActions: sellerOrderAllowedActions(result.order, 'ADMIN') });
   });
   router.get('/issues', async (request, res) => {

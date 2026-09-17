@@ -79,7 +79,7 @@ function cleanupRetiredImages(): Promise<void> {
 
 function completeSellerOrders(): Promise<void> {
   if (sellerCompletionRunning) return sellerCompletionRunning;
-  sellerCompletionRunning = completeDueSellerOrders(prisma).then((completed) => { if (completed > 0) logger.info({ completed }, 'Affiliate seller orders completed'); }).finally(() => { sellerCompletionRunning = null; });
+  sellerCompletionRunning = completeDueSellerOrders(prisma, composition.realtime.support).then((completed) => { if (completed > 0) logger.info({ completed }, 'Affiliate seller orders completed'); }).finally(() => { sellerCompletionRunning = null; });
   return sellerCompletionRunning;
 }
 

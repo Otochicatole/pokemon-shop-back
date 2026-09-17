@@ -10,6 +10,7 @@ export {
   createReceiptSubmittedNotifications,
   createSellerOrderAdminNotifications,
   createSellerOrderStatusNotification,
+  createBuyerSellerOrderStatusNotification,
   createSupportNotification,
   getNotificationUnreadCount,
   mapNotification,
