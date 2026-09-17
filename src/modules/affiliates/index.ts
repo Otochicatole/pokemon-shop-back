@@ -287,10 +287,33 @@ export function createAffiliateRouter(prisma: PrismaClient, upload: { array(fiel
     const input = versionSchema.parse(req.body);
     const listing = await prisma.affiliateListing.findFirst({ where: { id: String(req.params.id), affiliateId: affiliate.id }, include: { product: { include: { inventory: true } } } });
     if (!listing) throw notFound('Affiliate listing not found');
+    if (listing.status !== AffiliateListingStatus.APPROVED) throw conflict('LISTING_NOT_APPROVED', 'Only approved listings can be archived');
+    if (listing.product.status === ProductStatus.ARCHIVED) throw conflict('LISTING_ALREADY_ARCHIVED', 'Listing is already archived');
     if ((listing.product.inventory?.reserved ?? 0) > 0) throw conflict('INVENTORY_RESERVED', 'A listing with reserved units cannot be archived');
     const changed = await prisma.product.updateMany({ where: { id: listing.productId, version: input.expectedVersion }, data: { status: ProductStatus.ARCHIVED, archivedAt: new Date(), version: { increment: 1 } } });
     if (changed.count !== 1) throw conflict('PRODUCT_CHANGED', 'Listing was modified by another request');
+    await prisma.auditLog.create({ data: auditData('USER', affiliate.userId, 'AFFILIATE_LISTING_ARCHIVED', 'AffiliateListing', listing.id, { productId: listing.productId }) });
     return res.json({ id: listing.id, status: ProductStatus.ARCHIVED, version: input.expectedVersion + 1 });
+  });
+  router.post('/listings/:id/unarchive', async (req, res) => {
+    const affiliate = activeAffiliateOrThrow(req);
+    const input = versionSchema.parse(req.body);
+    const listing = await prisma.affiliateListing.findFirst({ where: { id: String(req.params.id), affiliateId: affiliate.id }, include: { product: true } });
+    if (!listing) throw notFound('Affiliate listing not found');
+    if (listing.product.status !== ProductStatus.ARCHIVED) throw conflict('LISTING_NOT_ARCHIVED', 'Only archived listings can be restored');
+    const nextStatus = listing.status === AffiliateListingStatus.APPROVED ? ProductStatus.PUBLISHED : ProductStatus.DRAFT;
+    const changed = await prisma.product.updateMany({
+      where: { id: listing.productId, version: input.expectedVersion, status: ProductStatus.ARCHIVED },
+      data: {
+        status: nextStatus,
+        archivedAt: null,
+        publishedAt: nextStatus === ProductStatus.PUBLISHED ? (listing.product.publishedAt ?? new Date()) : null,
+        version: { increment: 1 },
+      },
+    });
+    if (changed.count !== 1) throw conflict('PRODUCT_CHANGED', 'Listing was modified by another request');
+    await prisma.auditLog.create({ data: auditData('USER', affiliate.userId, 'AFFILIATE_LISTING_UNARCHIVED', 'AffiliateListing', listing.id, { productId: listing.productId, status: nextStatus }) });
+    return res.json({ id: listing.id, status: nextStatus, version: input.expectedVersion + 1 });
   });
   router.delete('/listings/:id', async (req, res) => {
     const affiliate = activeAffiliateOrThrow(req);
