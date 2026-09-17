@@ -186,6 +186,66 @@ const suppliers = [
   { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3', name: 'Importadora Prisma', contactName: 'Sofía Ruiz', email: 'sofia@importadoraprisma.test', phone: '+54 351 455 8899', address: 'Bv. San Juan 980, Córdoba', notes: 'Proveedor histórico actualmente inactivo.', active: false },
 ] as const;
 
+const supplierPurchaseFixtures = [
+  {
+    id: 'bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbbb1',
+    supplierId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+    ageHours: 72,
+    note: 'Reposición semanal · cartas individuales',
+    items: [
+      { id: 'bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbb01', productId: '11111111-1111-4111-8111-111111111111', quantity: 1, unitCostMinor: 80n },
+      { id: 'bbbbbbb1-bbbb-4bbb-8bbb-bbbbbbbbbb02', productId: '22222222-2222-4222-8222-222222222222', quantity: 1, unitCostMinor: 32n },
+    ],
+  },
+  {
+    id: 'bbbbbbb2-bbbb-4bbb-8bbb-bbbbbbbbbbb2',
+    supplierId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1',
+    ageHours: 240,
+    note: 'Caja sellada Aurora Origins',
+    items: [
+      { id: 'bbbbbbb2-bbbb-4bbb-8bbb-bbbbbbbbbb01', productId: '55555555-5555-4555-8555-555555555555', quantity: 4, unitCostMinor: 620n },
+    ],
+  },
+  {
+    id: 'bbbbbbb3-bbbb-4bbb-8bbb-bbbbbbbbbbb3',
+    supplierId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2',
+    ageHours: 36,
+    note: 'Accesorios y playmats',
+    items: [
+      { id: 'bbbbbbb3-bbbb-4bbb-8bbb-bbbbbbbbbb01', productId: '88888888-8888-4888-8888-888888888888', quantity: 10, unitCostMinor: 28n },
+      { id: 'bbbbbbb3-bbbb-4bbb-8bbb-bbbbbbbbbb02', productId: '99999998-9999-4999-8999-999999999998', quantity: 6, unitCostMinor: 55n },
+      { id: 'bbbbbbb3-bbbb-4bbb-8bbb-bbbbbbbbbb03', productId: '99999999-9999-4999-8999-999999999998', quantity: 8, unitCostMinor: 38n },
+    ],
+  },
+] as const;
+
+const newsFixtures = [
+  {
+    id: 'cccccccc-cccc-4ccc-8ccc-cccccccccc01',
+    title: 'El primer día',
+    summary: 'Sumamos accesorios para proteger, ordenar y exhibir tu colección con la tranquilidad que merece cada carta.',
+    sortOrder: 0,
+    active: true,
+    coverIndex: 30,
+  },
+  {
+    id: 'cccccccc-cccc-4ccc-8ccc-cccccccccc02',
+    title: 'Nueva ruta de sellados',
+    summary: 'Booster boxes y elite trainer boxes listos para abrir, guardar o regalar en la próxima sesión.',
+    sortOrder: 1,
+    active: true,
+    coverIndex: 31,
+  },
+  {
+    id: 'cccccccc-cccc-4ccc-8ccc-cccccccccc03',
+    title: 'Cartas destacadas de la semana',
+    summary: 'Seleccionamos piezas holográficas y full art con stock real y precios claros.',
+    sortOrder: 2,
+    active: true,
+    coverIndex: 32,
+  },
+] as const;
+
 const cmsOrderFixtures = [
   {
     number: 'CS-DEMO-1001', status: 'PAYMENT_REVIEW', paymentMethod: 'BANK_TRANSFER', paymentStatus: 'UNDER_REVIEW', fulfillmentType: 'SHIPMENT', ageHours: 2,
@@ -246,6 +306,102 @@ async function seedImage(productId: string, index: number, name: string) {
   await writeFile(absolute, output);
   await prisma.storedFile.upsert({ where: { id: fileId }, update: { storageKey: relative, mimeType: 'image/webp', sizeBytes: output.byteLength, sha256: createHash('sha256').update(output).digest('hex'), visibility: 'PUBLIC' }, create: { id: fileId, storageKey: relative, mimeType: 'image/webp', sizeBytes: output.byteLength, sha256: createHash('sha256').update(output).digest('hex'), visibility: 'PUBLIC' } });
   await prisma.productImage.upsert({ where: { fileId }, update: { productId, sortOrder: 0, altText: name }, create: { productId, fileId, sortOrder: 0, altText: name } });
+}
+
+async function seedNewsCover(index: number, title: string) {
+  const fileId = `n${String(index + 1).padStart(2, '0')}00000-0000-4000-8000-000000000000`;
+  const relative = `public/news/${fileId}.webp`;
+  const absolute = path.join(storageRoot, relative);
+  await mkdir(path.dirname(absolute), { recursive: true });
+  const output = await sharp(Buffer.from(svgFor(index + 40, title))).webp({ quality: 84 }).toBuffer();
+  await writeFile(absolute, output);
+  await prisma.storedFile.upsert({
+    where: { id: fileId },
+    update: { storageKey: relative, mimeType: 'image/webp', sizeBytes: output.byteLength, sha256: createHash('sha256').update(output).digest('hex'), visibility: 'PUBLIC' },
+    create: { id: fileId, storageKey: relative, mimeType: 'image/webp', sizeBytes: output.byteLength, sha256: createHash('sha256').update(output).digest('hex'), visibility: 'PUBLIC' },
+  });
+  return fileId;
+}
+
+async function seedNews(now: Date) {
+  for (const item of newsFixtures) {
+    const coverFileId = await seedNewsCover(item.coverIndex, item.title);
+    const startsAt = new Date(now.getTime() - 7 * 24 * hourMs);
+    const endsAt = new Date(now.getTime() + 60 * 24 * hourMs);
+    await prisma.newsItem.upsert({
+      where: { id: item.id },
+      update: {
+        title: item.title,
+        summary: item.summary,
+        coverFileId,
+        sortOrder: item.sortOrder,
+        active: item.active,
+        startsAt,
+        endsAt,
+        version: 1,
+      },
+      create: {
+        id: item.id,
+        title: item.title,
+        summary: item.summary,
+        coverFileId,
+        sortOrder: item.sortOrder,
+        active: item.active,
+        startsAt,
+        endsAt,
+        version: 1,
+      },
+    });
+  }
+}
+
+async function seedSupplierPurchases(input: { adminId: string; now: Date }) {
+  const productIds = [...new Set(supplierPurchaseFixtures.flatMap((purchase) => purchase.items.map((item) => item.productId)))];
+  const seededProducts = await prisma.product.findMany({
+    where: { id: { in: productIds } },
+    select: { id: true, sku: true, name: true },
+  });
+  const productsById = new Map(seededProducts.map((product) => [product.id, product]));
+
+  for (const fixture of supplierPurchaseFixtures) {
+    const purchasedAt = new Date(input.now.getTime() - fixture.ageHours * hourMs);
+    await prisma.supplierPurchase.upsert({
+      where: { id: fixture.id },
+      update: {
+        supplierId: fixture.supplierId,
+        purchasedAt,
+        note: fixture.note,
+        createdById: input.adminId,
+      },
+      create: {
+        id: fixture.id,
+        supplierId: fixture.supplierId,
+        purchasedAt,
+        note: fixture.note,
+        createdById: input.adminId,
+      },
+    });
+
+    await prisma.supplierPurchaseItem.deleteMany({ where: { purchaseId: fixture.id } });
+    for (const item of fixture.items) {
+      const product = productsById.get(item.productId);
+      if (!product) throw new Error(`Missing seed product ${item.productId} for purchase ${fixture.id}`);
+      const lineTotalMinor = item.unitCostMinor * BigInt(item.quantity);
+      await prisma.supplierPurchaseItem.create({
+        data: {
+          id: item.id,
+          purchaseId: fixture.id,
+          productId: product.id,
+          productSku: product.sku,
+          productName: product.name,
+          quantity: item.quantity,
+          unitCostMinor: item.unitCostMinor,
+          currency: BASE_CURRENCY,
+          lineTotalMinor,
+        },
+      });
+    }
+  }
 }
 
 const hourMs = 60 * 60 * 1000;
@@ -983,8 +1139,9 @@ async function main() {
   for (const supplier of suppliers) {
     await prisma.supplier.upsert({ where: { id: supplier.id }, update: supplier, create: supplier });
   }
-  const affiliateSeed = await seedAffiliateMarketplace({ adminId: admin.id, now });
-  await prisma.transferSettings.upsert({
+  await seedSupplierPurchases({ adminId: admin.id, now });
+  await seedNews(now);
+  const affiliateSeed = await seedAffiliateMarketplace({ adminId: admin.id, now });  await prisma.transferSettings.upsert({
     where: { id: 'default' },
     update: {
       enabled: true,
@@ -1040,6 +1197,8 @@ async function main() {
     transferSettings: { enabled: true, alias: 'cardshop.demo' },
     products: products.length,
     suppliers: suppliers.length,
+    supplierPurchases: supplierPurchaseFixtures.length,
+    news: newsFixtures.length,
     orders: cmsOrderFixtures.length + 1,
     pendingTransferReceiptFileId: receiptFileId,
     pickupPointId: pickupPoint.id,
