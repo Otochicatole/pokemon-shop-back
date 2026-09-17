@@ -574,6 +574,8 @@ async function seedAffiliateDemoOrder(input: {
     affiliateId: input.affiliate.affiliateId,
   });
 
+  let linkedSellerOrderId = sellerOrderId;
+
   await prisma.$transaction(async (tx) => {
     const orderData = {
       userId: input.userId,
@@ -634,18 +636,19 @@ async function seedAffiliateDemoOrder(input: {
       createdAt,
       updatedAt: preparingAt,
     };
-    await tx.sellerOrder.upsert({ where: { id: sellerOrderId }, update: sellerOrderData, create: { id: sellerOrderId, ...sellerOrderData } });
+    await tx.sellerOrder.upsert({ where: { number: sellerOrderData.number }, update: sellerOrderData, create: { id: sellerOrderId, ...sellerOrderData } });
+    linkedSellerOrderId = (await tx.sellerOrder.findUniqueOrThrow({ where: { number: sellerOrderData.number } })).id;
 
     await tx.orderItem.upsert({
       where: { id: itemId },
-      update: { orderId, sellerOrderId, productId: product.id, sku: product.sku, productName: product.name, productSnapshot, imageFileId, unitPriceMinor: product.priceMinor, quantity, lineTotalMinor: subtotalMinor },
-      create: { id: itemId, orderId, sellerOrderId, productId: product.id, sku: product.sku, productName: product.name, productSnapshot, imageFileId, unitPriceMinor: product.priceMinor, quantity, lineTotalMinor: subtotalMinor },
+      update: { orderId, sellerOrderId: linkedSellerOrderId, productId: product.id, sku: product.sku, productName: product.name, productSnapshot, imageFileId, unitPriceMinor: product.priceMinor, quantity, lineTotalMinor: subtotalMinor },
+      create: { id: itemId, orderId, sellerOrderId: linkedSellerOrderId, productId: product.id, sku: product.sku, productName: product.name, productSnapshot, imageFileId, unitPriceMinor: product.priceMinor, quantity, lineTotalMinor: subtotalMinor },
     });
 
     await tx.inventoryReservation.upsert({
       where: { orderId_productId: { orderId, productId: product.id } },
-      update: { sellerOrderId, quantity, expiresAt, releasedAt: null, consumedAt: paidAt, createdAt },
-      create: { id: reservationId, orderId, sellerOrderId, productId: product.id, quantity, expiresAt, releasedAt: null, consumedAt: paidAt, createdAt },
+      update: { sellerOrderId: linkedSellerOrderId, quantity, expiresAt, releasedAt: null, consumedAt: paidAt, createdAt },
+      create: { id: reservationId, orderId, sellerOrderId: linkedSellerOrderId, productId: product.id, quantity, expiresAt, releasedAt: null, consumedAt: paidAt, createdAt },
     });
 
     const paymentData = { method: 'MERCADO_PAGO' as const, status: 'APPROVED' as const, amountMinor: totalMinor, currency: BASE_CURRENCY, providerReference: `MP-${orderNumber}`, createdAt, updatedAt: paidAt };
@@ -677,21 +680,21 @@ async function seedAffiliateDemoOrder(input: {
     for (const entry of sellerHistory) {
       await tx.sellerOrderHistory.upsert({
         where: { id: entry.id },
-        update: { sellerOrderId, fromStatus: entry.from, toStatus: entry.to, note: sellerHistoryNote(entry.to), changedByType: entry.from ? 'ADMIN' : 'SYSTEM', changedById: entry.from ? input.adminId : null, createdAt: entry.at },
-        create: { id: entry.id, sellerOrderId, fromStatus: entry.from, toStatus: entry.to, note: sellerHistoryNote(entry.to), changedByType: entry.from ? 'ADMIN' : 'SYSTEM', changedById: entry.from ? input.adminId : null, createdAt: entry.at },
+        update: { sellerOrderId: linkedSellerOrderId, fromStatus: entry.from, toStatus: entry.to, note: sellerHistoryNote(entry.to), changedByType: entry.from ? 'ADMIN' : 'SYSTEM', changedById: entry.from ? input.adminId : null, createdAt: entry.at },
+        create: { id: entry.id, sellerOrderId: linkedSellerOrderId, fromStatus: entry.from, toStatus: entry.to, note: sellerHistoryNote(entry.to), changedByType: entry.from ? 'ADMIN' : 'SYSTEM', changedById: entry.from ? input.adminId : null, createdAt: entry.at },
       });
     }
 
     await tx.affiliateLedgerEntry.upsert({
-      where: { dedupeKey: `sale-pending:${sellerOrderId}` },
-      update: { affiliateId: input.affiliate.affiliateId, sellerOrderId, bucket: 'PENDING', type: 'SALE_PENDING', amountMinor: sellerNetMinor, note: 'Payment accredited; available after completion' },
-      create: { id: seedUuid(0xa9, 2), affiliateId: input.affiliate.affiliateId, sellerOrderId, bucket: 'PENDING', type: 'SALE_PENDING', amountMinor: sellerNetMinor, dedupeKey: `sale-pending:${sellerOrderId}`, note: 'Payment accredited; available after completion' },
+      where: { dedupeKey: `sale-pending:${linkedSellerOrderId}` },
+      update: { affiliateId: input.affiliate.affiliateId, sellerOrderId: linkedSellerOrderId, bucket: 'PENDING', type: 'SALE_PENDING', amountMinor: sellerNetMinor, note: 'Payment accredited; available after completion' },
+      create: { id: seedUuid(0xa9, 2), affiliateId: input.affiliate.affiliateId, sellerOrderId: linkedSellerOrderId, bucket: 'PENDING', type: 'SALE_PENDING', amountMinor: sellerNetMinor, dedupeKey: `sale-pending:${linkedSellerOrderId}`, note: 'Payment accredited; available after completion' },
     });
 
     await syncSeedInventory(tx, [{ id: listing.productId, sku: listing.sku, stock: listing.stock }]);
   });
 
-  return { orderNumber, sellerOrderId, productId: listing.productId };
+  return { orderNumber, sellerOrderId: linkedSellerOrderId, productId: listing.productId };
 }
 
 async function seedCmsOrders(input: {
@@ -805,7 +808,9 @@ async function seedCmsOrders(input: {
         createdAt,
         updatedAt,
       };
-      await tx.sellerOrder.upsert({ where: { id: sellerOrderId }, update: sellerOrderData, create: { id: sellerOrderId, ...sellerOrderData } });
+      await tx.sellerOrder.upsert({ where: { number: sellerOrderData.number }, update: sellerOrderData, create: { id: sellerOrderId, ...sellerOrderData } });
+      const storedSellerOrder = await tx.sellerOrder.findUniqueOrThrow({ where: { number: sellerOrderData.number } });
+      const linkedSellerOrderId = storedSellerOrder.id;
 
       for (const [itemOffset, resolved] of resolvedItems.entries()) {
         const itemNumber = fixtureNumber * 10 + itemOffset + 1;
@@ -825,15 +830,15 @@ async function seedCmsOrders(input: {
         });
         await tx.orderItem.upsert({
           where: { id: seedUuid(0xd0, itemNumber) },
-          update: { orderId, sellerOrderId, productId: resolved.product.id, sku: resolved.product.sku, productName: resolved.product.name, productSnapshot, imageFileId, unitPriceMinor: resolved.product.priceMinor, quantity: resolved.item.quantity, lineTotalMinor: resolved.lineTotalMinor },
-          create: { id: seedUuid(0xd0, itemNumber), orderId, sellerOrderId, productId: resolved.product.id, sku: resolved.product.sku, productName: resolved.product.name, productSnapshot, imageFileId, unitPriceMinor: resolved.product.priceMinor, quantity: resolved.item.quantity, lineTotalMinor: resolved.lineTotalMinor },
+          update: { orderId, sellerOrderId: linkedSellerOrderId, productId: resolved.product.id, sku: resolved.product.sku, productName: resolved.product.name, productSnapshot, imageFileId, unitPriceMinor: resolved.product.priceMinor, quantity: resolved.item.quantity, lineTotalMinor: resolved.lineTotalMinor },
+          create: { id: seedUuid(0xd0, itemNumber), orderId, sellerOrderId: linkedSellerOrderId, productId: resolved.product.id, sku: resolved.product.sku, productName: resolved.product.name, productSnapshot, imageFileId, unitPriceMinor: resolved.product.priceMinor, quantity: resolved.item.quantity, lineTotalMinor: resolved.lineTotalMinor },
         });
 
         const paidIndex = fixture.history.indexOf('PAID');
         const expiredIndex = fixture.history.indexOf('EXPIRED');
         const consumedAt = fixture.reservationState === 'CONSUMED' ? transitionDates[Math.max(0, paidIndex)] ?? updatedAt : null;
         const releasedAt = fixture.reservationState === 'RELEASED' ? transitionDates[Math.max(0, expiredIndex)] ?? updatedAt : null;
-        const reservationData = { sellerOrderId, quantity: resolved.item.quantity, expiresAt, releasedAt, consumedAt, createdAt };
+        const reservationData = { sellerOrderId: linkedSellerOrderId, quantity: resolved.item.quantity, expiresAt, releasedAt, consumedAt, createdAt };
         await tx.inventoryReservation.upsert({
           where: { orderId_productId: { orderId, productId: resolved.product.id } },
           update: reservationData,
@@ -844,7 +849,7 @@ async function seedCmsOrders(input: {
       for (const [historyOffset, toStatus] of sellerHistory.entries()) {
         const historyNumber = fixtureNumber * 100 + historyOffset + 1;
         const historyData = {
-          sellerOrderId,
+          sellerOrderId: linkedSellerOrderId,
           fromStatus: historyOffset === 0 ? null : sellerHistory[historyOffset - 1] ?? null,
           toStatus,
           note: sellerHistoryNote(toStatus),
@@ -898,7 +903,7 @@ async function seedCmsOrders(input: {
       }
 
       if (fixture.refund) {
-        const refundData = { paymentId, sellerOrderId, fullRefundKey: paymentId, amountMinor: totalMinor, currency: BASE_CURRENCY, reason: fixture.refund.reason, externalReference: fixture.refund.externalReference, createdAt: updatedAt, createdById: input.adminId };
+        const refundData = { paymentId, sellerOrderId: linkedSellerOrderId, fullRefundKey: paymentId, amountMinor: totalMinor, currency: BASE_CURRENCY, reason: fixture.refund.reason, externalReference: fixture.refund.externalReference, createdAt: updatedAt, createdById: input.adminId };
         await tx.refundRecord.upsert({ where: { fullRefundKey: paymentId }, update: refundData, create: { id: seedUuid(0xb3, fixtureNumber), ...refundData } });
       }
 
@@ -909,7 +914,7 @@ async function seedCmsOrders(input: {
         action: fixture.auditAction,
         entityType: 'Order',
         entityId: orderId,
-        metadata: JSON.stringify({ number: fixture.number, status: fixture.status, paymentMethod: fixture.paymentMethod, paymentStatus: fixture.paymentStatus, sellerOrderId }),
+        metadata: JSON.stringify({ number: fixture.number, status: fixture.status, paymentMethod: fixture.paymentMethod, paymentStatus: fixture.paymentStatus, sellerOrderId: linkedSellerOrderId }),
         requestId: `seed-${fixture.number.toLowerCase()}`,
         createdAt: updatedAt,
       };
