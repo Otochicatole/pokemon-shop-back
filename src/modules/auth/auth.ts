@@ -39,6 +39,39 @@ const LEGACY_GOOGLE_COOKIE = env.cookieSecure ? 'bcs_google_oauth' : '__Host-bcs
 // callback to localhost after a tunnel login.
 const redirectTarget = () => (env.PUBLIC_WEB_URL ?? env.frontendOrigins[0] ?? 'http://localhost:5173').replace(/\/+$/, '');
 
+function clearGoogleOAuthCookies(res: Response) {
+  const base = { path: '/', secure: env.cookieSecure, sameSite: 'lax' as const };
+  res.clearCookie(GOOGLE_COOKIE, base);
+  res.clearCookie(LEGACY_GOOGLE_COOKIE, base);
+}
+
+/**
+ * Avoid a pure HTTP bounce (Google → API 302 → store). Chromium bounce-tracking
+ * often drops host-only session cookies set on that 302. A 200 HTML document on
+ * the API host lets the cookie stick, then navigates to the store.
+ */
+function oauthBrowserHandoff(res: Response, path: string) {
+  const target = `${redirectTarget()}${path.startsWith('/') ? path : `/${path}`}`;
+  const safeHref = target.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  // Prefer meta-refresh over inline JS so production Helmet CSP cannot block the handoff.
+  res
+    .status(200)
+    .type('html')
+    .setHeader('Cache-Control', 'no-store')
+    .send(`<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Redirigiendo…</title>
+  <meta http-equiv="refresh" content="0;url=${safeHref}">
+</head>
+<body>
+  <p>Redirigiendo… <a href="${safeHref}">continuar</a></p>
+</body>
+</html>`);
+}
+
 function signOAuth(value: string): string {
   const encoded = Buffer.from(value).toString('base64url');
   const signature = createHmac('sha256', env.SESSION_SECRET).update(encoded).digest('base64url');
@@ -260,25 +293,22 @@ export function createAuthRouter(prisma: PrismaClient, options: AuthRouterOption
         if (!owner) throw unauthorized();
         if (user && user.id !== owner.id) throw conflict('OAUTH_ACCOUNT_LINKED', 'Google account is already linked');
         if (!user) await prisma.userOAuthAccount.create({ data: { userId: owner.id, issuer, subject: claims.sub, emailAtLogin: claims.email } });
-        res.clearCookie(GOOGLE_COOKIE, { path: '/' });
-        res.clearCookie(LEGACY_GOOGLE_COOKIE, { path: '/' });
-        return res.redirect(`${redirectTarget()}/account?oauth=linked`);
+        clearGoogleOAuthCookies(res);
+        return oauthBrowserHandoff(res, '/account?oauth=linked');
       }
       if (!user) {
         const existing = await prisma.user.findUnique({ where: { email: normalizeEmail(claims.email) } });
         if (existing) throw conflict('EXPLICIT_LINK_REQUIRED', 'Sign in locally before linking this Google account');
         user = await prisma.user.create({ data: { email: normalizeEmail(claims.email), name: claims.name, emailVerifiedAt: new Date(), oauthAccounts: { create: { issuer, subject: claims.sub, emailAtLogin: claims.email } } } });
       }
-      const session = await createUserSession(user.id, res, req, options.onSessionRevoked);
-      res.clearCookie(GOOGLE_COOKIE, { path: '/' });
-      res.clearCookie(LEGACY_GOOGLE_COOKIE, { path: '/' });
-      return res.redirect(`${redirectTarget()}/auth/callback?oauth=success`);
+      await createUserSession(user.id, res, req, options.onSessionRevoked);
+      clearGoogleOAuthCookies(res);
+      return oauthBrowserHandoff(res, '/auth/callback?oauth=success');
     } catch (error) {
       logger.warn({ err: error }, 'Google OAuth callback failed');
-      res.clearCookie(GOOGLE_COOKIE, { path: '/' });
-      res.clearCookie(LEGACY_GOOGLE_COOKIE, { path: '/' });
+      clearGoogleOAuthCookies(res);
       const result = error instanceof AppError && error.code === 'EXPLICIT_LINK_REQUIRED' ? 'link-required' : 'error';
-      return res.redirect(`${redirectTarget()}/auth/callback?oauth=${result}`);
+      return oauthBrowserHandoff(res, `/auth/callback?oauth=${result}`);
     }
   });
 
