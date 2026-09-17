@@ -38,7 +38,10 @@ type AdminSessionLookupOptions = {
 const cookieOptions = (httpOnly: boolean, secure = env.cookieSecure) => ({
   httpOnly,
   secure,
-  sameSite: 'strict' as const,
+  // Lax is required for Google OAuth: the callback is a top-level cross-site
+  // navigation that sets the session cookie and then redirects into the app.
+  // Strict cookies are often omitted on the follow-up /auth/me in production.
+  sameSite: 'lax' as const,
   path: '/',
   maxAge: httpOnly ? undefined : 8 * 60 * 60 * 1000,
 });
