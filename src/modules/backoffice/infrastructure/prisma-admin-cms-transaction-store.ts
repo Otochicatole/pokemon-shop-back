@@ -846,6 +846,15 @@ export class PrismaAdminCmsTransactionStore {
     }));
   }
 
+  deleteShippingZone(actor: AdminActor, id: string) {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const existing = await tx.shippingZone.findUnique({ where: { id } });
+      if (!existing) throw notFound('Shipping zone not found');
+      await tx.shippingZone.delete({ where: { id } });
+      await tx.auditLog.create({ data: auditData(actor, 'SHIPPING_ZONE_DELETED', 'ShippingZone', id, { name: existing.name }) });
+    }));
+  }
+
   createPickupPoint(actor: AdminActor, input: PickupPointWrite) {
     return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
       const point = await tx.pickupPoint.create({ data: input });
@@ -871,6 +880,15 @@ export class PrismaAdminCmsTransactionStore {
       await tx.pickupPoint.update({ where: { id }, data: { active } });
       await tx.auditLog.create({ data: auditData(actor, active ? 'PICKUP_POINT_ACTIVATED' : 'PICKUP_POINT_DEACTIVATED', 'PickupPoint', id) });
       return { id, active };
+    }));
+  }
+
+  deletePickupPoint(actor: AdminActor, id: string) {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const existing = await tx.pickupPoint.findUnique({ where: { id } });
+      if (!existing) throw notFound('Pickup point not found');
+      await tx.pickupPoint.delete({ where: { id } });
+      await tx.auditLog.create({ data: auditData(actor, 'PICKUP_POINT_DELETED', 'PickupPoint', id, { name: existing.name }) });
     }));
   }
 

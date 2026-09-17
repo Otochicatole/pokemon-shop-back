@@ -57,9 +57,11 @@ export interface FulfillmentAdminRepository {
   createShippingZone(actor: AdminActor, input: ShippingZoneWrite): Promise<ShippingZoneResultDto>;
   updateShippingZone(actor: AdminActor, id: string, input: ShippingZoneWrite): Promise<ShippingZoneResultDto>;
   setShippingZoneActive(actor: AdminActor, id: string, active: boolean): Promise<ActiveMutationDto>;
+  deleteShippingZone(actor: AdminActor, id: string): Promise<void>;
   createPickupPoint(actor: AdminActor, input: PickupPointWrite): Promise<PickupPointResultDto>;
   updatePickupPoint(actor: AdminActor, id: string, input: PickupPointWrite): Promise<PickupPointResultDto>;
   setPickupPointActive(actor: AdminActor, id: string, active: boolean): Promise<ActiveMutationDto>;
+  deletePickupPoint(actor: AdminActor, id: string): Promise<void>;
 }
 
 export interface CustomerAdminRepository {

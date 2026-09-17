@@ -8,7 +8,9 @@ export class FulfillmentAdminUseCases {
   createShippingZone(actor: AdminActor, input: ShippingZoneWrite) { return this.fulfillment.createShippingZone(actor, input); }
   updateShippingZone(actor: AdminActor, id: string, input: ShippingZoneWrite) { return this.fulfillment.updateShippingZone(actor, id, input); }
   setShippingZoneActive(actor: AdminActor, id: string, active: boolean) { return this.fulfillment.setShippingZoneActive(actor, id, active); }
+  deleteShippingZone(actor: AdminActor, id: string) { return this.fulfillment.deleteShippingZone(actor, id); }
   createPickupPoint(actor: AdminActor, input: PickupPointWrite) { return this.fulfillment.createPickupPoint(actor, input); }
   updatePickupPoint(actor: AdminActor, id: string, input: PickupPointWrite) { return this.fulfillment.updatePickupPoint(actor, id, input); }
   setPickupPointActive(actor: AdminActor, id: string, active: boolean) { return this.fulfillment.setPickupPointActive(actor, id, active); }
+  deletePickupPoint(actor: AdminActor, id: string) { return this.fulfillment.deletePickupPoint(actor, id); }
 }

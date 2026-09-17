@@ -197,9 +197,17 @@ export function createAdminCmsRouter({ application, upload, requireAdmin, actorF
   router.post('/fulfillment/shipping-zones', async (req, res) => res.status(201).json(await application.fulfillment.createShippingZone(actorFromRequest(req), shippingZoneWriteSchema.parse(req.body))));
   router.patch('/fulfillment/shipping-zones/:id', async (req, res) => res.json(await application.fulfillment.updateShippingZone(actorFromRequest(req), idParamsSchema.parse(req.params).id, shippingZoneWriteSchema.parse(req.body))));
   router.patch('/fulfillment/shipping-zones/:id/active', async (req, res) => res.json(await application.fulfillment.setShippingZoneActive(actorFromRequest(req), idParamsSchema.parse(req.params).id, activeSchema.parse(req.body).active)));
+  router.delete('/fulfillment/shipping-zones/:id', async (req, res) => {
+    await application.fulfillment.deleteShippingZone(actorFromRequest(req), idParamsSchema.parse(req.params).id);
+    return noContent(res);
+  });
   router.post('/fulfillment/pickup-points', async (req, res) => res.status(201).json(await application.fulfillment.createPickupPoint(actorFromRequest(req), pickupPointWriteSchema.parse(req.body))));
   router.patch('/fulfillment/pickup-points/:id', async (req, res) => res.json(await application.fulfillment.updatePickupPoint(actorFromRequest(req), idParamsSchema.parse(req.params).id, pickupPointWriteSchema.parse(req.body))));
   router.patch('/fulfillment/pickup-points/:id/active', async (req, res) => res.json(await application.fulfillment.setPickupPointActive(actorFromRequest(req), idParamsSchema.parse(req.params).id, activeSchema.parse(req.body).active)));
+  router.delete('/fulfillment/pickup-points/:id', async (req, res) => {
+    await application.fulfillment.deletePickupPoint(actorFromRequest(req), idParamsSchema.parse(req.params).id);
+    return noContent(res);
+  });
   // Compatibility aliases retained for existing operational scripts.
   router.post('/shipping-zones', async (req, res) => res.status(201).json(await application.fulfillment.createShippingZone(actorFromRequest(req), shippingZoneWriteSchema.parse(req.body))));
   router.post('/pickup-points', async (req, res) => res.status(201).json(await application.fulfillment.createPickupPoint(actorFromRequest(req), pickupPointWriteSchema.parse(req.body))));
