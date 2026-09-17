@@ -89,7 +89,9 @@ type NewsRecord = Prisma.NewsItemGetPayload<object>;
 
 function mapNews(value: NewsRecord): NewsDto {
   return {
-    id: value.id, title: value.title, summary: value.summary, sortOrder: value.sortOrder, active: value.active,
+    id: value.id, title: value.title, summary: value.summary,
+    coverFileId: value.coverFileId, coverUrl: value.coverFileId ? `/media/public/${value.coverFileId}` : null,
+    sortOrder: value.sortOrder, active: value.active,
     startsAt: value.startsAt, endsAt: value.endsAt, version: value.version,
     createdAt: value.createdAt, updatedAt: value.updatedAt,
   };
@@ -497,11 +499,53 @@ export class PrismaAdminCmsTransactionStore {
 
   deleteNews(actor: AdminActor, id: string, expectedVersion: number): Promise<void> {
     return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
-      const existing = await tx.newsItem.findUnique({ where: { id } });
+      const existing = await tx.newsItem.findUnique({ where: { id }, include: { coverFile: true } });
       if (!existing) throw notFound('News item not found');
-      const deleted = await tx.newsItem.deleteMany({ where: { id, version: expectedVersion } });
-      if (deleted.count !== 1) throw conflict('NEWS_CHANGED', 'La noticia fue modificada por otro administrador');
+      const detached = await tx.newsItem.updateMany({
+        where: { id, version: expectedVersion },
+        data: { coverFileId: null },
+      });
+      if (detached.count !== 1) throw conflict('NEWS_CHANGED', 'La noticia fue modificada por otro administrador');
+      await tx.newsItem.delete({ where: { id } });
+      await scheduleFileCleanup(tx, existing.coverFile);
       await tx.auditLog.create({ data: auditData(actor, 'NEWS_DELETED', 'NewsItem', id, { fromVersion: expectedVersion }) });
+    }));
+  }
+
+  setNewsCover(actor: AdminActor, id: string, expectedVersion: number, coverFileId: string) {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const existing = await tx.newsItem.findUnique({ where: { id }, include: { coverFile: true } });
+      if (!existing) throw notFound('News item not found');
+      const file = await tx.storedFile.findUnique({ where: { id: coverFileId }, include: { productImage: true, transferReceipt: true, newsCover: true } });
+      if (!file || file.visibility !== 'PUBLIC') throw badRequest('INVALID_COVER', 'La imagen de portada no es válida');
+      if (file.productImage || file.transferReceipt || (file.newsCover && file.newsCover.id !== id)) {
+        throw conflict('COVER_ATTACHED', 'La imagen ya está asociada a otro recurso');
+      }
+      const changed = await tx.newsItem.updateMany({
+        where: { id, version: expectedVersion },
+        data: { coverFileId, version: { increment: 1 } },
+      });
+      if (changed.count !== 1) throw conflict('NEWS_CHANGED', 'La noticia fue modificada por otro administrador');
+      if (existing.coverFile && existing.coverFile.id !== coverFileId) await scheduleFileCleanup(tx, existing.coverFile);
+      await tx.auditLog.create({ data: auditData(actor, 'NEWS_COVER_SET', 'NewsItem', id, { fromVersion: expectedVersion, coverFileId }) });
+      const news = await tx.newsItem.findUniqueOrThrow({ where: { id } });
+      return { news: mapNews(news) };
+    }));
+  }
+
+  clearNewsCover(actor: AdminActor, id: string, expectedVersion: number) {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      const existing = await tx.newsItem.findUnique({ where: { id }, include: { coverFile: true } });
+      if (!existing) throw notFound('News item not found');
+      const changed = await tx.newsItem.updateMany({
+        where: { id, version: expectedVersion },
+        data: { coverFileId: null, version: { increment: 1 } },
+      });
+      if (changed.count !== 1) throw conflict('NEWS_CHANGED', 'La noticia fue modificada por otro administrador');
+      await scheduleFileCleanup(tx, existing.coverFile);
+      await tx.auditLog.create({ data: auditData(actor, 'NEWS_COVER_CLEARED', 'NewsItem', id, { fromVersion: expectedVersion }) });
+      const news = await tx.newsItem.findUniqueOrThrow({ where: { id } });
+      return { news: mapNews(news) };
     }));
   }
 

@@ -52,7 +52,7 @@ export interface MailPort {
 }
 
 export interface FileStorage {
-  save(file: Express.Multer.File, visibility: 'PUBLIC' | 'PRIVATE', folder: 'products' | 'receipts'): Promise<{ id: string; storageKey: string }>;
+  save(file: Express.Multer.File, visibility: 'PUBLIC' | 'PRIVATE', folder: 'products' | 'receipts' | 'news'): Promise<{ id: string; storageKey: string }>;
   remove(storageKey: string): Promise<void>;
 }
 

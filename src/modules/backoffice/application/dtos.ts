@@ -257,6 +257,8 @@ export type NewsDto = {
   id: string;
   title: string;
   summary: string;
+  coverFileId: string | null;
+  coverUrl: string | null;
   sortOrder: number;
   active: boolean;
   startsAt: Date | null;

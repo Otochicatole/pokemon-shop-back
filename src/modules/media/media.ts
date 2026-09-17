@@ -17,7 +17,7 @@ export async function ensureStorage() {
   await Promise.all([mkdir(path.join(root, 'db'), { recursive: true }), mkdir(path.join(root, 'public'), { recursive: true }), mkdir(path.join(root, 'private'), { recursive: true }), mkdir(path.join(root, 'tmp'), { recursive: true })]);
 }
 
-export async function saveImage(prisma: PrismaClient, file: Express.Multer.File, visibility: 'PUBLIC' | 'PRIVATE', folder: 'products' | 'receipts') {
+export async function saveImage(prisma: PrismaClient, file: Express.Multer.File, visibility: 'PUBLIC' | 'PRIVATE', folder: 'products' | 'receipts' | 'news') {
   if (!file || !allowed.has(file.mimetype)) throw badRequest('INVALID_FILE_TYPE', 'Only JPEG, PNG and WebP images are accepted');
   if (folder === 'receipts' && file.size > 5 * 1024 * 1024) throw badRequest('FILE_TOO_LARGE', 'Transfer receipts are limited to 5 MB');
   let output: Buffer;
@@ -46,8 +46,8 @@ export async function saveImage(prisma: PrismaClient, file: Express.Multer.File,
 
 /** Compensates a failed database attachment without ever removing referenced media. */
 export async function discardUnattachedFile(prisma: PrismaClient, fileId: string): Promise<boolean> {
-  const file = await prisma.storedFile.findUnique({ where: { id: fileId }, include: { productImage: true, transferReceipt: true } });
-  if (!file || file.productImage || file.transferReceipt) return false;
+  const file = await prisma.storedFile.findUnique({ where: { id: fileId }, include: { productImage: true, transferReceipt: true, newsCover: true } });
+  if (!file || file.productImage || file.transferReceipt || file.newsCover) return false;
   await unlink(safePath(file.storageKey)).catch((error: unknown) => {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   });

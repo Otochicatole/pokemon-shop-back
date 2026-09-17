@@ -1,6 +1,7 @@
 import { Router, type Request, type RequestHandler } from 'express';
 import type multer from 'multer';
 import { Readable } from 'node:stream';
+import { z } from 'zod';
 import { AppError, badRequest } from '../../../shared/errors.js';
 import type { AdminCmsApplication } from '../application/admin-cms-application.js';
 import type { AdminActor } from '../domain/admin-cms.js';
@@ -49,6 +50,7 @@ export type AdminCmsHttpDependencies = {
   actorFromRequest(request: Request): AdminActor;
   media: {
     saveProductImage(file: Express.Multer.File): Promise<{ id: string }>;
+    saveNewsCover(file: Express.Multer.File): Promise<{ id: string }>;
     discardUnattachedFile(id: string): Promise<boolean>;
   };
 };
@@ -158,6 +160,24 @@ export function createAdminCmsRouter({ application, upload, requireAdmin, actorF
   router.delete('/news/:id', async (req, res) => {
     await application.news.delete(actorFromRequest(req), idParamsSchema.parse(req.params).id, expectedVersionSchema.parse(req.body).expectedVersion);
     return noContent(res);
+  });
+  router.post('/news/:id/cover', upload.single('cover'), async (req: Request, res) => {
+    const newsId = idParamsSchema.parse(req.params).id;
+    const file = req.file;
+    if (!file) throw badRequest('COVER_REQUIRED', 'Se requiere una imagen de portada');
+    const { expectedVersion } = z.object({ expectedVersion: z.coerce.number().int().min(1) }).parse(req.body);
+    const stored = await media.saveNewsCover(file);
+    try {
+      return res.status(201).json(await application.news.setCover(actorFromRequest(req), newsId, expectedVersion, stored.id));
+    } catch (error) {
+      await media.discardUnattachedFile(stored.id).catch(() => false);
+      throw error;
+    }
+  });
+  router.delete('/news/:id/cover', async (req, res) => {
+    const newsId = idParamsSchema.parse(req.params).id;
+    const { expectedVersion } = expectedVersionSchema.parse(req.body);
+    return res.json(await application.news.clearCover(actorFromRequest(req), newsId, expectedVersion));
   });
 
   router.get('/orders', async (req, res) => res.json(await application.orders.list(orderListQuerySchema.parse(req.query))));

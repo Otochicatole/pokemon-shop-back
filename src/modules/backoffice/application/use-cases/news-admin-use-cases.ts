@@ -9,4 +9,6 @@ export class NewsAdminUseCases {
   create(actor: AdminActor, input: NewsWrite) { return this.news.createNews(actor, input); }
   update(actor: AdminActor, id: string, input: NewsPatch) { return this.news.updateNews(actor, id, input); }
   delete(actor: AdminActor, id: string, expectedVersion: number) { return this.news.deleteNews(actor, id, expectedVersion); }
+  setCover(actor: AdminActor, id: string, expectedVersion: number, coverFileId: string) { return this.news.setNewsCover(actor, id, expectedVersion, coverFileId); }
+  clearCover(actor: AdminActor, id: string, expectedVersion: number) { return this.news.clearNewsCover(actor, id, expectedVersion); }
 }

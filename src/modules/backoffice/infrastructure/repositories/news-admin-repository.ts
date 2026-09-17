@@ -8,4 +8,6 @@ export class NewsAdminRepositoryAdapter implements NewsAdminRepository {
   createNews(actor: AdminActor, input: NewsWrite) { return this.source.createNews(actor, input); }
   updateNews(actor: AdminActor, id: string, input: NewsPatch) { return this.source.updateNews(actor, id, input); }
   deleteNews(actor: AdminActor, id: string, expectedVersion: number) { return this.source.deleteNews(actor, id, expectedVersion); }
+  setNewsCover(actor: AdminActor, id: string, expectedVersion: number, coverFileId: string) { return this.source.setNewsCover(actor, id, expectedVersion, coverFileId); }
+  clearNewsCover(actor: AdminActor, id: string, expectedVersion: number) { return this.source.clearNewsCover(actor, id, expectedVersion); }
 }

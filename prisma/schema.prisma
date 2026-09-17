@@ -1121,19 +1121,22 @@ model StoredFile {
   createdAt       DateTime         @default(now())
   productImage    ProductImage?
   transferReceipt TransferReceipt?
+  newsCover       NewsItem?
 }
 
 model NewsItem {
-  id           String     @id @default(uuid())
+  id           String      @id @default(uuid())
   title        String
   summary      String
-  sortOrder    Int        @default(0)
-  active       Boolean    @default(false)
+  coverFileId  String?     @unique
+  sortOrder    Int         @default(0)
+  active       Boolean     @default(false)
   startsAt     DateTime?
   endsAt       DateTime?
-  version      Int        @default(1)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  version      Int         @default(1)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  coverFile    StoredFile? @relation(fields: [coverFileId], references: [id], onDelete: Restrict)
 
   @@index([active, sortOrder, startsAt, endsAt])
 }

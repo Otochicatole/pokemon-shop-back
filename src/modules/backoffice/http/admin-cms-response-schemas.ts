@@ -180,7 +180,9 @@ export const adminSupplierDetailDataSchema = z.object({ supplier: adminSupplierS
 export const adminSupplierActiveMutationDataSchema = z.object({ id: z.string().uuid(), active: z.boolean(), version: z.number().int() });
 
 export const adminNewsSchema = z.object({
-  id: z.string().uuid(), title: z.string(), summary: z.string(), sortOrder: z.number().int(), active: z.boolean(),
+  id: z.string().uuid(), title: z.string(), summary: z.string(),
+  coverFileId: z.string().uuid().nullable(), coverUrl: z.string().nullable(),
+  sortOrder: z.number().int(), active: z.boolean(),
   startsAt: nullableDateTime, endsAt: nullableDateTime, version: z.number().int(), createdAt: dateTime, updatedAt: dateTime,
 });
 export const adminNewsDetailDataSchema = z.object({ news: adminNewsSchema });

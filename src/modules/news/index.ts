@@ -7,10 +7,16 @@ export const publicNewsItemSchema = z.object({
   id: z.string().uuid(),
   title: z.string(),
   summary: z.string(),
+  coverUrl: z.string().nullable(),
 });
 
-function mapPublicNews(item: { id: string; title: string; summary: string }) {
-  return { id: item.id, title: item.title, summary: item.summary };
+function mapPublicNews(item: { id: string; title: string; summary: string; coverFileId: string | null }) {
+  return {
+    id: item.id,
+    title: item.title,
+    summary: item.summary,
+    coverUrl: item.coverFileId ? `/media/public/${item.coverFileId}` : null,
+  };
 }
 
 export function createNewsRouter(prisma: PrismaClient): Router {

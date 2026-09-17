@@ -82,6 +82,7 @@ export function createCompositionRoot(): CompositionRoot {
     actorFromRequest,
     media: {
       saveProductImage: (file) => saveImage(prisma, file, 'PUBLIC', 'products'),
+      saveNewsCover: (file) => saveImage(prisma, file, 'PUBLIC', 'news'),
       discardUnattachedFile: (id) => discardUnattachedFile(prisma, id),
     },
   });

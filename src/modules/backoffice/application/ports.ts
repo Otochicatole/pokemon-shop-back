@@ -98,6 +98,8 @@ export interface NewsAdminRepository {
   createNews(actor: AdminActor, input: NewsWrite): Promise<NewsDetailDto>;
   updateNews(actor: AdminActor, id: string, input: NewsPatch): Promise<NewsDetailDto>;
   deleteNews(actor: AdminActor, id: string, expectedVersion: number): Promise<void>;
+  setNewsCover(actor: AdminActor, id: string, expectedVersion: number, coverFileId: string): Promise<NewsDetailDto>;
+  clearNewsCover(actor: AdminActor, id: string, expectedVersion: number): Promise<NewsDetailDto>;
 }
 
 export type AdminCmsRepositories = {
