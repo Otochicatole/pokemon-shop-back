@@ -1,32 +1,35 @@
 import { Router, type Express, type RequestHandler } from 'express';
 import { randomUUID, createCipheriv, createDecipheriv, createHash } from 'node:crypto';
+import { Readable } from 'node:stream';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { AffiliateIssueStatus, AffiliateLedgerBucket, AffiliateListingStatus, AffiliatePayoutStatus, AffiliateStatus, NotificationType, ProductStatus, SellerOrderStatus } from '@prisma/client';
 import { z } from 'zod';
 import { env } from '../../config/env.js';
 import { currentAdmin, currentAffiliate, currentUser, requireAdmin, requireAffiliate } from '../../infrastructure/sessions.js';
-import { badRequest, conflict, forbidden, notFound } from '../../shared/errors.js';
+import { AppError, badRequest, conflict, forbidden, notFound } from '../../shared/errors.js';
 import { logger } from '../../infrastructure/logger.js';
 import { discardUnattachedFile, saveImage } from '../media/index.js';
 import { BASE_CURRENCY } from '../../shared/currency.js';
+import { getCard, searchCards } from '../tcgdex/index.js';
 import { affiliateBalance, requestSellerCancellation, refundSellerOrder, resolveAffiliateIssue, resolveCancellation, sellerOrderAllowedActions, transitionSellerOrder } from './affiliate-marketplace-service.js';
 import { createAdminNotifications, createAffiliateListingNotification, createAffiliatePayoutNotification, createSellerOrderAdminNotifications, createSellerOrderStatusNotification, publishNotifications } from '../notifications/index.js';
 import type { SupportRealtimeHub } from '../support/support-realtime.js';
 
 const versionSchema = z.object({ expectedVersion: z.coerce.number().int().min(1) });
+const pokemonCardFields = z.object({
+  setName: z.string().trim().min(1).max(180), setCode: z.string().trim().max(30).optional(), cardNumber: z.string().trim().min(1).max(30),
+  rarity: z.string().trim().min(1).max(100), language: z.string().trim().min(1).max(50), condition: z.enum(['NM', 'EXCELLENT', 'GOOD', 'PLAYED', 'DAMAGED']),
+  pokemonType: z.enum(['COLORLESS', 'DARKNESS', 'DRAGON', 'FAIRY', 'FIGHTING', 'FIRE', 'GRASS', 'LIGHTNING', 'METAL', 'PSYCHIC', 'WATER']).optional(),
+  finish: z.string().trim().max(50).optional(), edition: z.string().trim().max(100).optional(), gradingCompany: z.string().trim().max(100).optional(), grade: z.string().trim().max(30).optional(), certificationNumber: z.string().trim().max(100).optional(),
+});
 const baseProductFields = z.object({
   name: z.string().trim().min(2).max(180),
   description: z.string().trim().max(5000).default(''),
   kind: z.enum(['SINGLE_CARD', 'SEALED_PRODUCT', 'ACCESSORY']),
   stockMode: z.enum(['UNIQUE', 'QUANTITY']).default('QUANTITY'),
-  priceMinor: z.coerce.bigint().nonnegative(),
+  priceMinor: z.coerce.bigint().positive(),
   stock: z.coerce.number().int().nonnegative().max(1_000_000),
-  pokemonCard: z.object({
-    setName: z.string().trim().min(1).max(180), setCode: z.string().trim().max(30).optional(), cardNumber: z.string().trim().min(1).max(30),
-    rarity: z.string().trim().min(1).max(100), language: z.string().trim().min(1).max(50), condition: z.enum(['NM', 'EXCELLENT', 'GOOD', 'PLAYED', 'DAMAGED']),
-    pokemonType: z.enum(['COLORLESS', 'DARKNESS', 'DRAGON', 'FAIRY', 'FIGHTING', 'FIRE', 'GRASS', 'LIGHTNING', 'METAL', 'PSYCHIC', 'WATER']).optional(),
-    finish: z.string().trim().max(50).optional(), edition: z.string().trim().max(100).optional(), gradingCompany: z.string().trim().max(100).optional(), grade: z.string().trim().max(30).optional(), certificationNumber: z.string().trim().max(100).optional(),
-  }).optional(),
+  pokemonCard: pokemonCardFields.optional(),
 });
 const productFields = baseProductFields.superRefine((value, context) => {
   if (value.kind === 'SINGLE_CARD' && !value.pokemonCard) context.addIssue({ code: 'custom', path: ['pokemonCard'], message: 'Card metadata is required for single cards' });
@@ -34,7 +37,43 @@ const productFields = baseProductFields.superRefine((value, context) => {
   if (value.stockMode === 'UNIQUE' && value.stock > 1) context.addIssue({ code: 'custom', path: ['stock'], message: 'Unique products can only have one unit' });
 });
 
-const updateProductFields = baseProductFields.partial().extend({ expectedVersion: z.coerce.number().int().min(1) });
+const updateProductFields = baseProductFields.partial().extend({
+  expectedVersion: z.coerce.number().int().min(1),
+  pokemonCard: pokemonCardFields.nullable().optional(),
+  priceMinor: z.coerce.bigint().positive().optional(),
+}).superRefine((value, context) => {
+  if (value.kind === 'SINGLE_CARD' && value.pokemonCard === null) context.addIssue({ code: 'custom', path: ['pokemonCard'], message: 'Card metadata is required for single cards' });
+  if (value.kind && value.kind !== 'SINGLE_CARD' && value.pokemonCard) context.addIssue({ code: 'custom', path: ['pokemonCard'], message: 'Card metadata is only valid for single cards' });
+  if (value.stockMode === 'UNIQUE' && value.stock !== undefined && value.stock > 1) context.addIssue({ code: 'custom', path: ['stock'], message: 'Unique products can only have one unit' });
+});
+const imageOrderSchema = versionSchema.extend({ imageIds: z.array(z.string().uuid()).max(8) });
+const tcgdexSearchQuerySchema = z.object({ q: z.string().trim().min(2).max(80) });
+const tcgdexCardParamsSchema = z.object({ id: z.string().trim().min(2).max(120).regex(/^[A-Za-z0-9._-]+$/) });
+const tcgdexImageImportSchema = versionSchema.extend({ imageUrl: z.string().url().max(500) });
+const tcgdexImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+function tcgdexImageUrl(value: string) {
+  let parsed: URL;
+  try { parsed = new URL(value); } catch { throw badRequest('TCGDEX_IMAGE_URL_INVALID', 'La imagen de TCGdex no es válida'); }
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'assets.tcgdex.net') throw badRequest('TCGDEX_IMAGE_URL_INVALID', 'Solo se admiten imágenes oficiales de TCGdex');
+  return parsed.toString();
+}
+
+async function downloadTcgdexImage(value: string): Promise<Express.Multer.File> {
+  const url = tcgdexImageUrl(value);
+  let response: Response;
+  try { response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(15_000) }); } catch { throw new AppError(502, 'TCGDEX_IMAGE_UNAVAILABLE', 'No se pudo descargar la imagen de TCGdex'); }
+  if (!response.ok) throw new AppError(502, 'TCGDEX_IMAGE_UNAVAILABLE', 'No se pudo descargar la imagen de TCGdex');
+  const contentType = (response.headers.get('content-type') ?? '').split(';').at(0)?.trim() ?? '';
+  const contentLength = Number(response.headers.get('content-length') ?? 0);
+  if (!tcgdexImageTypes.has(contentType) || contentLength > 10 * 1024 * 1024) throw badRequest('TCGDEX_IMAGE_INVALID', 'La imagen de TCGdex no tiene un formato admitido');
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.byteLength > 10 * 1024 * 1024) throw badRequest('TCGDEX_IMAGE_TOO_LARGE', 'La imagen de TCGdex supera el límite permitido');
+  return {
+    fieldname: 'image', originalname: 'tcgdex-card.webp', encoding: '7bit', mimetype: contentType,
+    destination: '', filename: 'tcgdex-card.webp', path: '', size: buffer.byteLength, buffer, stream: Readable.from(buffer),
+  };
+}
 const listingReviewSchema = versionSchema.extend({ decision: z.enum(['APPROVED', 'CHANGES_REQUESTED', 'REJECTED']), note: z.string().trim().max(500).optional() });
 const profilePatchSchema = versionSchema.extend({ publicName: z.string().trim().min(2).max(120).optional(), contactPhone: z.string().trim().max(50).nullable().optional(), payoutAccount: z.string().trim().min(4).max(500).nullable().optional() });
 const zoneSchema = z.object({ name: z.string().trim().min(2).max(120), provinces: z.array(z.string().trim().min(2).max(120)).min(1).max(100) });
@@ -172,18 +211,30 @@ export function createAffiliateRouter(prisma: PrismaClient, upload: { array(fiel
   router.put('/listings/:id', async (req, res) => {
     const affiliate = activeAffiliateOrThrow(req);
     const input = updateProductFields.parse(req.body);
-    const listing = await prisma.affiliateListing.findFirst({ where: { id: String(req.params.id), affiliateId: affiliate.id }, include: { product: { include: { inventory: true } } } });
+    const listing = await prisma.affiliateListing.findFirst({ where: { id: String(req.params.id), affiliateId: affiliate.id }, include: { product: { include: { inventory: true, pokemonCard: true } } } });
     if (!listing) throw notFound('Affiliate listing not found');
     if (listing.product.status === ProductStatus.ARCHIVED) throw conflict('LISTING_ARCHIVED', 'Archived listings cannot be edited');
+    const nextKind = input.kind ?? listing.product.kind;
+    const nextStockMode = input.stockMode ?? listing.product.stockMode;
+    const nextStock = input.stock ?? listing.product.inventory?.onHand ?? 0;
+    if (nextKind === 'SINGLE_CARD' && input.pokemonCard === undefined && !listing.product.pokemonCard) throw badRequest('POKEMON_CARD_REQUIRED', 'Single cards require Pokémon card metadata');
+    if (nextStockMode === 'UNIQUE' && nextStock > 1) throw badRequest('UNIQUE_STOCK_INVALID', 'Unique products can only have one unit');
     const automaticallySubmitted = listing.status === AffiliateListingStatus.APPROVED;
     const nextListingStatus = automaticallySubmitted ? AffiliateListingStatus.PENDING_REVIEW : AffiliateListingStatus.DRAFT;
-    const data: Prisma.ProductUpdateInput = {
-      ...(input.name !== undefined ? { name: input.name } : {}), ...(input.description !== undefined ? { description: input.description } : {}),
-      ...(input.kind !== undefined ? { kind: input.kind } : {}), ...(input.stockMode !== undefined ? { stockMode: input.stockMode } : {}), ...(input.priceMinor !== undefined ? { priceMinor: input.priceMinor } : {}),
-      version: { increment: 1 },
-    };
     await prisma.$transaction(async (tx) => {
-      const changed = await tx.product.updateMany({ where: { id: listing.productId, version: input.expectedVersion }, data });
+      const changed = await tx.product.updateMany({
+        where: { id: listing.productId, version: input.expectedVersion },
+        data: {
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.kind !== undefined ? { kind: input.kind } : {}),
+          ...(input.stockMode !== undefined ? { stockMode: input.stockMode } : {}),
+          ...(input.priceMinor !== undefined ? { priceMinor: input.priceMinor } : {}),
+          status: ProductStatus.DRAFT,
+          publishedAt: null,
+          version: { increment: 1 },
+        },
+      });
       if (changed.count !== 1) throw conflict('PRODUCT_CHANGED', 'Listing was modified by another request');
       if (input.stock !== undefined) {
         const previousStock = listing.product.inventory?.onHand ?? 0;
@@ -191,11 +242,12 @@ export function createAffiliateRouter(prisma: PrismaClient, upload: { array(fiel
         if (inventory.count !== 1) throw conflict('INVENTORY_CHANGED', 'Inventory was modified by another request');
         if (input.stock !== previousStock) await tx.inventoryAdjustment.create({ data: { productId: listing.productId, delta: input.stock - previousStock, reason: 'Affiliate inventory update', affiliateId: affiliate.id } });
       }
-      if (input.pokemonCard !== undefined) {
+      if (nextKind !== 'SINGLE_CARD') {
         await tx.pokemonCardDetails.deleteMany({ where: { productId: listing.productId } });
-        if (input.pokemonCard) await tx.pokemonCardDetails.create({ data: { productId: listing.productId, ...input.pokemonCard } });
+      } else if (input.pokemonCard) {
+        await tx.pokemonCardDetails.deleteMany({ where: { productId: listing.productId } });
+        await tx.pokemonCardDetails.create({ data: { productId: listing.productId, ...input.pokemonCard } });
       }
-      await tx.product.update({ where: { id: listing.productId }, data: { status: ProductStatus.DRAFT, publishedAt: null } });
       await tx.affiliateListing.update({ where: { id: listing.id }, data: { status: nextListingStatus, reviewNote: null, submittedAt: automaticallySubmitted ? new Date() : null, reviewedAt: null, reviewedById: null } });
       await tx.auditLog.create({ data: auditData('USER', affiliate.userId, 'AFFILIATE_LISTING_UPDATED', 'AffiliateListing', listing.id, { fromVersion: input.expectedVersion, toVersion: input.expectedVersion + 1 }) });
     });
@@ -294,6 +346,54 @@ export function createAffiliateRouter(prisma: PrismaClient, upload: { array(fiel
       await tx.affiliateListing.update({ where: { id: listing.id }, data: { status: AffiliateListingStatus.DRAFT, reviewNote: null, submittedAt: null, reviewedAt: null, reviewedById: null } });
     });
     return res.status(204).send();
+  });
+  router.put('/listings/:id/images/order', async (req, res) => {
+    const affiliate = activeAffiliateOrThrow(req);
+    const input = imageOrderSchema.parse(req.body);
+    const listing = await prisma.affiliateListing.findFirst({ where: { id: String(req.params.id), affiliateId: affiliate.id }, include: { product: { include: { images: { where: { retiredAt: null } } } } } });
+    if (!listing) throw notFound('Affiliate listing not found');
+    const currentIds = listing.product.images.map((image) => image.id).sort();
+    const received = [...new Set(input.imageIds)].sort();
+    if (currentIds.length !== received.length || currentIds.some((id, index) => id !== received[index])) throw badRequest('IMAGE_ORDER_INVALID', 'Image order must include every active image exactly once');
+    await prisma.$transaction(async (tx) => {
+      const versioned = await tx.product.updateMany({ where: { id: listing.productId, version: input.expectedVersion }, data: { status: ProductStatus.DRAFT, publishedAt: null, version: { increment: 1 } } });
+      if (versioned.count !== 1) throw conflict('PRODUCT_CHANGED', 'Listing was modified by another request');
+      for (const [sortOrder, id] of input.imageIds.entries()) await tx.productImage.update({ where: { id }, data: { sortOrder } });
+      await tx.affiliateListing.update({ where: { id: listing.id }, data: { status: AffiliateListingStatus.DRAFT, reviewNote: null, submittedAt: null, reviewedAt: null, reviewedById: null } });
+    });
+    return res.json({ imageIds: input.imageIds, version: input.expectedVersion + 1 });
+  });
+  router.post('/listings/:id/tcgdex-image', async (req, res) => {
+    const affiliate = activeAffiliateOrThrow(req);
+    const input = tcgdexImageImportSchema.parse(req.body);
+    const listing = await prisma.affiliateListing.findFirst({ where: { id: String(req.params.id), affiliateId: affiliate.id }, include: { product: { include: { images: { where: { retiredAt: null } } } } } });
+    if (!listing) throw notFound('Affiliate listing not found');
+    if (listing.product.images.length >= 8) throw badRequest('IMAGE_LIMIT', 'A listing can contain up to eight active images');
+    const file = await downloadTcgdexImage(input.imageUrl);
+    const stored = await saveAffiliateImage(file);
+    try {
+      await prisma.$transaction(async (tx) => {
+        const versioned = await tx.product.updateMany({ where: { id: listing.productId, version: input.expectedVersion }, data: { status: ProductStatus.DRAFT, publishedAt: null, version: { increment: 1 } } });
+        if (versioned.count !== 1) throw conflict('PRODUCT_CHANGED', 'Listing was modified by another request');
+        await tx.productImage.updateMany({ where: { productId: listing.productId, retiredAt: null }, data: { sortOrder: { increment: 1 } } });
+        await tx.productImage.create({ data: { productId: listing.productId, fileId: stored.id, sortOrder: 0, altText: 'Imagen oficial de TCGdex', createdByAffiliateId: affiliate.id } });
+        await tx.affiliateListing.update({ where: { id: listing.id }, data: { status: AffiliateListingStatus.DRAFT, reviewNote: null, submittedAt: null, reviewedAt: null, reviewedById: null } });
+      });
+    } catch (error) {
+      await discardFile(stored.id);
+      throw error;
+    }
+    return res.status(201).json({ fileIds: [stored.id], version: input.expectedVersion + 1 });
+  });
+  router.get('/tcgdex/cards', async (req, res) => {
+    activeAffiliateOrThrow(req);
+    const query = tcgdexSearchQuerySchema.parse(req.query);
+    return res.json({ data: await searchCards(query.q), meta: {} });
+  });
+  router.get('/tcgdex/cards/:id', async (req, res) => {
+    activeAffiliateOrThrow(req);
+    const params = tcgdexCardParamsSchema.parse(req.params);
+    return res.json({ data: { card: await getCard(params.id) }, meta: {} });
   });
 
   router.get('/logistics', async (req, res) => {
