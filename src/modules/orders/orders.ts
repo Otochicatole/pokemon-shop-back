@@ -177,7 +177,9 @@ async function calculateCheckout(tx: any, input: CheckoutInput, userId: string) 
     group.fulfillment = fulfillment;
     if (fulfillment.type === 'SHIPMENT') {
       const rate = await tx.shippingRate.findUnique({ where: { id: fulfillment.shippingRateId }, include: { zone: { include: { provinces: true } } } });
-      if (!rate || !rate.active || !rate.zone.active || rate.zone.affiliateId !== group.affiliateId || !rate.zone.provinces.some((province: any) => province.province.toLowerCase() === fulfillment.province.toLowerCase())) throw badRequest('INVALID_SHIPPING_RATE', 'Shipping rate is not valid for this seller and province');
+      if (!rate || !rate.active || !rate.zone.active || rate.zone.affiliateId !== group.affiliateId || !rate.zone.provinces.some((province: any) => province.province.toLowerCase() === fulfillment.province.toLowerCase())) {
+        throw badRequest('INVALID_SHIPPING_RATE', 'La tarifa de envío no está disponible para ese vendedor y provincia');
+      }
       group.shipping = rate.priceMinor; group.snapshot = { shippingZoneName: rate.zone.name, shippingRateName: rate.name, shippingRatePriceMinor: rate.priceMinor, shippingRateId: rate.id };
     } else {
       const pickup = await tx.pickupPoint.findUnique({ where: { id: fulfillment.pickupPointId } });

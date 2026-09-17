@@ -92,7 +92,41 @@ export function createApp(composition = createCompositionRoot()): Express {
       const status = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
       return res.status(status).json({ type: 'https://example.com/problems/upload', title: 'Invalid upload', detail: error.message, status, code: error.code, requestId });
     }
-    if (error instanceof ZodError) return res.status(400).json({ type: 'https://example.com/problems/validation', title: 'Validation error', detail: 'The request contains invalid fields', status: 400, code: 'VALIDATION_ERROR', requestId, issues: error.issues.map((issue) => ({ path: issue.path, message: issue.message })) });
+    if (error instanceof ZodError) {
+      const fieldLabels: Record<string, string> = {
+        'fulfillment.recipientName': 'nombre completo',
+        'fulfillment.recipientPhone': 'teléfono',
+        'fulfillment.addressLine1': 'dirección',
+        'fulfillment.addressLine2': 'piso/departamento',
+        'fulfillment.city': 'ciudad',
+        'fulfillment.province': 'provincia',
+        'fulfillment.postalCode': 'código postal',
+        'fulfillment.shippingRateId': 'tarifa de envío',
+        'fulfillment.pickupPointId': 'punto de retiro',
+        paymentMethod: 'medio de pago',
+        pointsToRedeem: 'puntos a canjear',
+        items: 'productos del carrito',
+      };
+      const first = error.issues[0];
+      const path = first?.path?.join('.') ?? '';
+      const label = fieldLabels[path] ?? fieldLabels[path.replace(/\[\d+\]/g, '')] ?? (path || 'un campo');
+      const tooSmall = first?.code === 'too_small';
+      const invalidUuid = first?.code === 'invalid_string' && (first as { validation?: string }).validation === 'uuid';
+      const detail = tooSmall
+        ? `Revisá ${label}: el valor es demasiado corto o está incompleto`
+        : invalidUuid
+          ? `Revisá ${label}: la opción seleccionada no es válida`
+          : `Revisá ${label}: los datos enviados no son válidos`;
+      return res.status(400).json({
+        type: 'https://example.com/problems/validation',
+        title: detail,
+        detail,
+        status: 400,
+        code: 'VALIDATION_ERROR',
+        requestId,
+        issues: error.issues.map((issue) => ({ path: issue.path, message: issue.message })),
+      });
+    }
     if (error instanceof AppError) return res.status(error.status).json({ type: `https://example.com/problems/${error.code.toLowerCase()}`, title: error.message, detail: error.message, status: error.status, code: error.code, requestId, ...(error.details ? { details: error.details } : {}) });
     logger.error({ err: error, requestId }, 'Unhandled request error');
     return res.status(500).json({ type: 'https://example.com/problems/internal', title: 'Internal server error', status: 500, code: 'INTERNAL_ERROR', requestId });
