@@ -36,6 +36,19 @@ export type TransferSettingsDto = {
   updatedAt: Date;
 };
 
+export type ExchangeRateSettingsDto = {
+  casa: string;
+  version: number;
+  updatedAt: Date;
+  availableCasas: Array<{ value: string; label: string; rate: string | null }>;
+  currentRate: {
+    source: string;
+    rate: string;
+    fetchedAt: Date;
+    expiresAt: Date;
+  } | null;
+};
+
 export type LoyaltyAccountDto = {
   balance: number;
   reserved: number;

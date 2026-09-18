@@ -20,7 +20,8 @@ const rawSchema = z.object({
   MERCADOPAGO_ACCESS_TOKEN: z.string().optional(),
   MERCADOPAGO_WEBHOOK_SECRET: z.string().optional(),
   MERCADOPAGO_COLLECTOR_ID: z.string().optional(),
-  DOLARAPI_URL: z.string().url().default('https://dolarapi.com/v1/dolares/blue'),
+  DOLARAPI_BASE_URL: z.string().url().default('https://dolarapi.com/v1/dolares'),
+  DOLARAPI_URL: z.string().url().optional(),
   DOLARAPI_TIMEOUT_MS: z.coerce.number().int().min(500).max(15_000).default(3_000),
   DOLARAPI_CACHE_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(1_800),
   SMTP_HOST: z.string().optional(),
@@ -42,8 +43,19 @@ if (parsed.NODE_ENV === 'production') {
 
 const toBool = (value: string): boolean => ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
 
+function resolveDolarApiBaseUrl() {
+  if (parsed.DOLARAPI_BASE_URL && parsed.DOLARAPI_BASE_URL !== 'https://dolarapi.com/v1/dolares') {
+    return parsed.DOLARAPI_BASE_URL.replace(/\/+$/, '');
+  }
+  if (parsed.DOLARAPI_URL) {
+    return parsed.DOLARAPI_URL.replace(/\/+$/, '').replace(/\/(?:oficial|blue|bolsa|contadoconliqui|mayorista|cripto|tarjeta)$/i, '');
+  }
+  return 'https://dolarapi.com/v1/dolares';
+}
+
 export const env = {
   ...parsed,
+  DOLARAPI_BASE_URL: resolveDolarApiBaseUrl(),
   cookieSecure: toBool(parsed.COOKIE_SECURE),
   swaggerEnabled: toBool(parsed.SWAGGER_ENABLED),
   mercadoPagoEnabled: toBool(parsed.MERCADOPAGO_ENABLED),

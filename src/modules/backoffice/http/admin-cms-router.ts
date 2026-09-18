@@ -12,7 +12,7 @@ import {
   pickupPointWriteSchema, productImageParamsSchema, productListQuerySchema, productPatchSchema,
   productWriteSchema, refundSchema, shippingZoneWriteSchema, supplierActiveSchema, supplierListQuerySchema,
   supplierPatchSchema, supplierPurchaseParamsSchema, supplierPurchaseWriteSchema, supplierWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
-  loyaltyProgramWriteSchema, transferSettingsWriteSchema, tcgdexCardParamsSchema, tcgdexImageImportSchema, tcgdexSearchQuerySchema,
+  loyaltyProgramWriteSchema, transferSettingsWriteSchema, exchangeRateSettingsWriteSchema, tcgdexCardParamsSchema, tcgdexImageImportSchema, tcgdexSearchQuerySchema,
   newsListQuerySchema, newsWriteSchema, newsPatchSchema, newsSettingsWriteSchema,
 } from './admin-cms-schemas.js';
 import { getCard, listRarities, searchCards } from '../../tcgdex/index.js';
@@ -65,6 +65,8 @@ export function createAdminCmsRouter({ application, upload, requireAdmin, actorF
   router.patch('/loyalty/config', async (req, res) => res.json(await application.loyalty.update(actorFromRequest(req), loyaltyProgramWriteSchema.parse(req.body))));
   router.get('/config/transfer', async (_req, res) => res.json(await application.transferSettings.get()));
   router.patch('/config/transfer', async (req, res) => res.json(await application.transferSettings.update(actorFromRequest(req), transferSettingsWriteSchema.parse(req.body))));
+  router.get('/config/exchange-rate', async (_req, res) => res.json(await application.exchangeRateSettings.get()));
+  router.patch('/config/exchange-rate', async (req, res) => res.json(await application.exchangeRateSettings.update(actorFromRequest(req), exchangeRateSettingsWriteSchema.parse(req.body))));
 
   router.get('/tcgdex/cards', async (req, res) => {
     const query = tcgdexSearchQuerySchema.parse(req.query);

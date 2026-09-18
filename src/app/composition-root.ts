@@ -19,6 +19,7 @@ import { createSupportRouters, SupportRealtimeHub } from '../modules/support/ind
 import { createNotificationsRouters } from '../modules/notifications/index.js';
 import { PrismaUnitOfWork } from '../shared/infrastructure/prisma-unit-of-work.js';
 import { createMercadoPagoGateway, getTransferSettings, transferSettingsConfigured, type MercadoPagoGateway } from '../modules/payments/index.js';
+import { createFxRouter } from '../modules/payments/fx-router.js';
 import { createNewsRouter } from '../modules/news/index.js';
 import { createAffiliateRouter, createAdminAffiliateRouter } from '../modules/affiliates/index.js';
 
@@ -44,6 +45,7 @@ export interface CompositionRoot {
     notifications: ReturnType<typeof createNotificationsRouters>['userRouter'];
     adminNotifications: ReturnType<typeof createNotificationsRouters>['adminRouter'];
     backoffice: ReturnType<typeof createAdminCmsRouter>;
+    fx: ReturnType<typeof createFxRouter>;
     media: ReturnType<typeof createMediaRouter>;
     docs: ReturnType<typeof createDocsRouter>;
   };
@@ -109,6 +111,7 @@ export function createCompositionRoot(): CompositionRoot {
       notifications: notificationRouters.userRouter,
       adminNotifications: notificationRouters.adminRouter,
       backoffice: backofficeRouter,
+      fx: createFxRouter(prisma),
       media: createMediaRouter(prisma),
       docs: createDocsRouter(),
     },

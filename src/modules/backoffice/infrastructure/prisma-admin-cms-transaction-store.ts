@@ -5,7 +5,7 @@ import type { PickupPointWrite, ShippingZoneWrite } from '../application/ports.j
 import type { JsonValue, NewsDto, OrderDto, OrderStatusMutationDto, RefundDto, SupplierDto, SupplierPurchaseDto, SupplierPurchaseItemDto, TransferReviewDto } from '../application/dtos.js';
 import type {
   AdminActor, AuditListQuery, CustomerListQuery, OrderListQuery, OrderStatusValue,
-  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierPurchaseWrite, SupplierWrite, LoyaltyProgramWrite, TransferSettingsWrite, NewsListQuery, NewsPatch, NewsSettingsWrite, NewsWrite,
+  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierPurchaseWrite, SupplierWrite, LoyaltyProgramWrite, TransferSettingsWrite, ExchangeRateSettingsWrite, NewsListQuery, NewsPatch, NewsSettingsWrite, NewsWrite,
 } from '../domain/admin-cms.js';
 import { allowedOrderTransitions } from '../domain/admin-cms.js';
 import { getLoyaltyProgram, mapLoyaltyProgram, releaseOrderLoyaltyReservation, reverseOrderLoyalty, settleOrderLoyalty } from '../../loyalty/index.js';
@@ -13,7 +13,7 @@ import { BASE_CURRENCY } from '../../../shared/currency.js';
 import type { BaseCurrency } from '../../../shared/currency.js';
 import type { SupportRealtimeHub } from '../../support/support-realtime.js';
 import { createOrderStatusNotification, publishNotifications } from '../../notifications/index.js';
-import { getTransferSettings as readTransferSettings, mapTransferSettings, transferSettingsConfigured } from '../../payments/index.js';
+import { getTransferSettings as readTransferSettings, mapTransferSettings, transferSettingsConfigured, DOLAR_CASAS, ensureExchangeRateSettings, getConfiguredUsdArsRate, isDolarCasa, listDolarApiVentaRates } from '../../payments/index.js';
 import { settleSellerOrdersOnPayment } from '../../orders/index.js';
 import { closeAndReverseAffiliateSellerOrdersOnParentRefund, closeUnpaidSellerOrders, sellerOrderAllowedActions } from '../../affiliates/affiliate-marketplace-service.js';
 
@@ -1068,6 +1068,92 @@ export class PrismaAdminCmsTransactionStore {
 
   async getTransferSettings() {
     return mapTransferSettings(await readTransferSettings(this.prisma));
+  }
+
+  async getExchangeRateSettings() {
+    const settings = await ensureExchangeRateSettings(this.prisma);
+    let currentRate: { source: string; rate: string; fetchedAt: Date; expiresAt: Date } | null = null;
+    try {
+      const quote = await getConfiguredUsdArsRate(this.prisma);
+      currentRate = { source: quote.source, rate: quote.rate, fetchedAt: quote.fetchedAt, expiresAt: quote.expiresAt };
+    } catch {
+      currentRate = null;
+    }
+    let liveRates: Partial<Record<(typeof DOLAR_CASAS)[number], string>> = {};
+    try {
+      liveRates = await listDolarApiVentaRates();
+    } catch {
+      liveRates = {};
+    }
+    const labels: Record<string, string> = {
+      oficial: 'Oficial',
+      blue: 'Blue',
+      bolsa: 'Bolsa',
+      contadoconliqui: 'Contado con liquidación',
+      mayorista: 'Mayorista',
+      cripto: 'Cripto',
+      tarjeta: 'Tarjeta',
+    };
+    return {
+      casa: isDolarCasa(settings.casa) ? settings.casa : 'blue',
+      version: settings.version,
+      updatedAt: settings.updatedAt,
+      availableCasas: DOLAR_CASAS.map((value) => ({
+        value,
+        label: labels[value] ?? value,
+        rate: liveRates[value] ?? null,
+      })),
+      currentRate,
+    };
+  }
+
+  updateExchangeRateSettings(actor: AdminActor, input: ExchangeRateSettingsWrite) {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      await ensureExchangeRateSettings(tx);
+      const changed = await tx.exchangeRateSettings.updateMany({
+        where: { id: 'default', version: input.expectedVersion },
+        data: { casa: input.casa, updatedById: actor.adminId, version: { increment: 1 } },
+      });
+      if (changed.count !== 1) {
+        if (!await tx.exchangeRateSettings.count({ where: { id: 'default' } })) throw notFound('Exchange rate settings not found');
+        throw conflict('EXCHANGE_RATE_SETTINGS_CHANGED', 'La configuración fue modificada por otro administrador');
+      }
+      const settings = await ensureExchangeRateSettings(tx);
+      await tx.auditLog.create({ data: auditData(actor, 'EXCHANGE_RATE_SETTINGS_UPDATED', 'ExchangeRateSettings', settings.id, {
+        casa: settings.casa,
+        version: settings.version,
+        fromVersion: input.expectedVersion,
+        toVersion: settings.version,
+      }) });
+      let currentRate: { source: string; rate: string; fetchedAt: Date; expiresAt: Date } | null = null;
+      try {
+        const quote = await getConfiguredUsdArsRate(this.prisma);
+        currentRate = { source: quote.source, rate: quote.rate, fetchedAt: quote.fetchedAt, expiresAt: quote.expiresAt };
+      } catch {
+        currentRate = null;
+      }
+      let liveRates: Partial<Record<(typeof DOLAR_CASAS)[number], string>> = {};
+      try {
+        liveRates = await listDolarApiVentaRates();
+      } catch {
+        liveRates = {};
+      }
+      const labels: Record<string, string> = {
+        oficial: 'Oficial', blue: 'Blue', bolsa: 'Bolsa', contadoconliqui: 'Contado con liquidación',
+        mayorista: 'Mayorista', cripto: 'Cripto', tarjeta: 'Tarjeta',
+      };
+      return {
+        casa: isDolarCasa(settings.casa) ? settings.casa : 'blue',
+        version: settings.version,
+        updatedAt: settings.updatedAt,
+        availableCasas: DOLAR_CASAS.map((value) => ({
+          value,
+          label: labels[value] ?? value,
+          rate: liveRates[value] ?? null,
+        })),
+        currentRate,
+      };
+    }));
   }
 
   updateTransferSettings(actor: AdminActor, input: TransferSettingsWrite) {

@@ -27,6 +27,19 @@ export const adminTransferSettingsSchema = z.object({
   version: z.number().int().positive(), updatedAt: dateTime, currency: z.literal(BASE_CURRENCY),
 });
 
+export const adminExchangeRateSettingsSchema = z.object({
+  casa: z.enum(['oficial', 'blue', 'bolsa', 'contadoconliqui', 'mayorista', 'cripto', 'tarjeta']),
+  version: z.number().int().positive(),
+  updatedAt: dateTime,
+  availableCasas: z.array(z.object({ value: z.string(), label: z.string(), rate: z.string().nullable() })),
+  currentRate: z.object({
+    source: z.string(),
+    rate: z.string(),
+    fetchedAt: dateTime,
+    expiresAt: dateTime,
+  }).nullable(),
+});
+
 export const adminProductImageSchema = z.object({
   id: z.string().uuid(), fileId: z.string().uuid(), url: z.string(), altText: z.string().nullable(),
   sortOrder: z.number().int(), createdAt: dateTime.optional(),

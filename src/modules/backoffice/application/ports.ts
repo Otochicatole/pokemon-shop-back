@@ -5,13 +5,13 @@ import type {
   ProductImageOrderDto, ProductImagesDto, ProductImageUpdateDto, ProductStatusDto, RefundDto,
   ShippingZoneResultDto, TransferReviewDto,
   SupplierActiveMutationDto, SupplierDetailDto, SupplierDto, SupplierPurchaseDetailDto, SupplierPurchaseDto,
-  LoyaltyProgramDto, TransferSettingsDto,
+  LoyaltyProgramDto, TransferSettingsDto, ExchangeRateSettingsDto,
   NewsDetailDto, NewsDto, NewsSettingsDto,
 } from './dtos.js';
 import type {
   AdminActor, AuditListQuery, CustomerListQuery, OrderListQuery, OrderStatusValue,
   ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierPurchaseWrite, SupplierWrite,
-  LoyaltyProgramWrite, TransferSettingsWrite,
+  LoyaltyProgramWrite, TransferSettingsWrite, ExchangeRateSettingsWrite,
   NewsListQuery, NewsPatch, NewsWrite, NewsSettingsWrite,
 } from '../domain/admin-cms.js';
 
@@ -96,6 +96,11 @@ export interface TransferSettingsAdminRepository {
   updateTransferSettings(actor: AdminActor, input: TransferSettingsWrite): Promise<TransferSettingsDto>;
 }
 
+export interface ExchangeRateSettingsAdminRepository {
+  getExchangeRateSettings(): Promise<ExchangeRateSettingsDto>;
+  updateExchangeRateSettings(actor: AdminActor, input: ExchangeRateSettingsWrite): Promise<ExchangeRateSettingsDto>;
+}
+
 export interface NewsAdminRepository {
   listNews(query: NewsListQuery): Promise<CursorPageDto<NewsDto>>;
   getNews(id: string): Promise<NewsDetailDto>;
@@ -120,6 +125,7 @@ export type AdminCmsRepositories = {
   suppliers: SupplierAdminRepository;
   loyalty: LoyaltyAdminRepository;
   transferSettings: TransferSettingsAdminRepository;
+  exchangeRateSettings: ExchangeRateSettingsAdminRepository;
   news: NewsAdminRepository;
 };
 

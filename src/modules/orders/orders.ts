@@ -17,7 +17,7 @@ import { logger } from '../../infrastructure/logger.js';
 import { calculateLoyaltyQuote, releaseOrderLoyaltyReservation, reserveLoyaltyPoints, reverseOrderLoyalty, settleOrderLoyalty } from '../loyalty/index.js';
 import { createAdminNotifications, createOrderCreatedNotifications, createOrderStatusNotification, createPaymentApprovedNotifications, createPaymentReviewNotifications, createReceiptSubmittedNotifications, createSellerOrderAdminNotifications, createSellerOrderStatusNotification, publishNotifications } from '../notifications/index.js';
 import type { SupportRealtimeHub } from '../support/support-realtime.js';
-import { buildMercadoPagoCheckoutOrder, createMercadoPagoGateway, DOLARAPI_SOURCE, formatRate, getDolarBlueVenta, getTransferSettings, providerAmountToMinor, usdMinorToArsMinor, mapTransferInstructions, transferSettingsConfigured, type ExchangeRateQuote, type MercadoPagoGateway, type TransferSettingsRecord } from '../payments/index.js';
+import { buildMercadoPagoCheckoutOrder, createMercadoPagoGateway, dolarApiSource, formatRate, getConfiguredDolarCasa, getConfiguredUsdArsRate, getTransferSettings, providerAmountToMinor, usdMinorToArsMinor, mapTransferInstructions, transferSettingsConfigured, type ExchangeRateQuote, type MercadoPagoGateway, type TransferSettingsRecord } from '../payments/index.js';
 import { closeAndReverseAffiliateSellerOrdersOnParentRefund, closeUnpaidSellerOrders, createBuyerIssue, reconcileParentOrder, sellerOrderAllowedActions, transitionSellerOrder } from '../affiliates/affiliate-marketplace-service.js';
 
 const itemSchema = z.object({ productId: z.string().uuid(), quantity: z.number().int().min(1).max(100), productVersion: z.number().int().min(1) });
@@ -483,7 +483,7 @@ export async function reconcileMercadoOrder(providerOrderId: string, realtime?: 
 async function mercadoPagoAvailability(prisma: PrismaClient, gateway: MercadoPagoGateway | null) {
   if (!gateway) return { enabled: false, reason: 'NOT_CONFIGURED' as const };
   try {
-    await getDolarBlueVenta(prisma);
+    await getConfiguredUsdArsRate(prisma);
     return { enabled: true, reason: undefined } as const;
   } catch (error) {
     logger.warn({ err: error }, 'DolarAPI quote unavailable; disabling Mercado Pago checkout');
@@ -530,7 +530,7 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?:
     const quote = await calculateCheckout(prisma, input, user.id);
     let rate: ExchangeRateQuote | null = null;
     if (input.paymentMethod === 'MERCADO_PAGO') {
-      try { rate = await getDolarBlueVenta(prisma); }
+      try { rate = await getConfiguredUsdArsRate(prisma); }
       catch (error) { logger.warn({ err: error }, 'Unable to obtain DolarAPI quote for checkout preview'); throw new AppError(503, 'FX_RATE_UNAVAILABLE', 'No pudimos obtener la cotización para Mercado Pago'); }
     }
     const previewExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
@@ -553,7 +553,8 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?:
       expiresAt: previewExpiresAt,
       mercadoPago: rate ? {
         rateSnapshotId: rate.id,
-        source: DOLARAPI_SOURCE,
+        source: rate.source,
+        casa: rate.casa,
         rate: rate.rate,
         fetchedAt: rate.fetchedAt,
         expiresAt: rate.expiresAt < previewExpiresAt ? rate.expiresAt : previewExpiresAt,
@@ -584,7 +585,9 @@ export function createOrdersRouter(prisma: PrismaClient, upload: any, realtime?:
        let providerAmountMinor: bigint | undefined;
        if (input.paymentMethod === 'MERCADO_PAGO') {
          if (!input.rateSnapshotId) throw badRequest('FX_QUOTE_REQUIRED', 'A current exchange-rate quote is required for Mercado Pago');
-         const snapshot = await tx.exchangeRateSnapshot.findFirst({ where: { id: input.rateSnapshotId, source: DOLARAPI_SOURCE, baseCurrency: 'USD', quoteCurrency: 'ARS', expiresAt: { gt: new Date() } } });
+         const casa = await getConfiguredDolarCasa(prisma);
+         const source = dolarApiSource(casa);
+         const snapshot = await tx.exchangeRateSnapshot.findFirst({ where: { id: input.rateSnapshotId, source, baseCurrency: 'USD', quoteCurrency: 'ARS', expiresAt: { gt: new Date() } } });
          if (!snapshot) throw conflict('FX_QUOTE_EXPIRED', 'The exchange-rate quote has expired; request a new quote');
          providerAmountMinor = usdMinorToArsMinor(quote.total, snapshot.sellRateMicros);
          if (providerAmountMinor <= 0n) throw badRequest('INVALID_PAYMENT_AMOUNT', 'The Mercado Pago amount must be greater than zero');

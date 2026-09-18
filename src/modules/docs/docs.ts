@@ -301,7 +301,7 @@ export function buildOpenApi(): import('openapi3-ts/oas31').OpenAPIObject {
     method: 'post', path: '/api/v2/checkout/preview', tags: ['Checkout'], security: userSecurity,
     request: { headers: csrfHeader, body: { required: true, content: { 'application/json': { schema: orderInputSchema } } } },
     responses: {
-      200: { description: 'Server-calculated quote, including the loyalty discount and Mercado Pago ARS conversion', content: { 'application/json': { schema: envelope(z.object({ subtotal: moneySchema, discount: moneySchema, shipping: moneySchema, total: moneySchema, loyalty: checkoutLoyaltySchema, expiresAt: dateTimeSchema, mercadoPago: z.object({ rateSnapshotId: z.string().uuid(), source: z.literal('DOLARAPI_BLUE_VENTA'), rate: z.string(), fetchedAt: dateTimeSchema, expiresAt: dateTimeSchema, total: providerMoneySchema }).nullable().optional() })) } } },
+      200: { description: 'Server-calculated quote, including the loyalty discount and Mercado Pago ARS conversion', content: { 'application/json': { schema: envelope(z.object({ subtotal: moneySchema, discount: moneySchema, shipping: moneySchema, total: moneySchema, loyalty: checkoutLoyaltySchema, expiresAt: dateTimeSchema, mercadoPago: z.object({ rateSnapshotId: z.string().uuid(), source: z.string(), casa: z.string().optional(), rate: z.string(), fetchedAt: dateTimeSchema, expiresAt: dateTimeSchema, total: providerMoneySchema }).nullable().optional() })) } } },
       ...publicErrors,
     },
   });

@@ -8,5 +8,5 @@ export { getTransferSettings, mapTransferInstructions, mapTransferSettings, tran
 export type { TransferSettingsRecord } from './transfer-settings.js';
 export { buildMercadoPagoCheckoutOrder, createMercadoPagoGateway, providerAmountDecimal, providerAmountToMinor } from './mercado-pago.js';
 export type { MercadoPagoCheckoutOrderInput, MercadoPagoGateway, MercadoPagoOrderBody } from './mercado-pago.js';
-export { DOLARAPI_SOURCE, formatRate, getDolarBlueVenta, parseRateMicros, usdMinorToArsMinor } from './exchange-rate.js';
-export type { ExchangeRateQuote } from './exchange-rate.js';
+export { ensureExchangeRateSettings, DOLAR_CASAS, dolarApiSource, formatRate, getConfiguredDolarCasa, getConfiguredUsdArsRate, getDolarBlueVenta, isDolarCasa, listDolarApiVentaRates, parseRateMicros, usdMinorToArsMinor } from './exchange-rate.js';
+export type { DolarCasa, ExchangeRateQuote } from './exchange-rate.js';

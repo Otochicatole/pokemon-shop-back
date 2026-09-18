@@ -95,6 +95,11 @@ export type TransferSettingsWrite = {
   expectedVersion: number;
 };
 
+export type ExchangeRateSettingsWrite = {
+  casa: 'oficial' | 'blue' | 'bolsa' | 'contadoconliqui' | 'mayorista' | 'cripto' | 'tarjeta';
+  expectedVersion: number;
+};
+
 export type ProductListQuery = CursorPage & {
   search?: string;
   status?: ProductStatusValue;

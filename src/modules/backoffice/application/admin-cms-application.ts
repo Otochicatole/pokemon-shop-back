@@ -10,6 +10,7 @@ import { ProductAdminUseCases } from './use-cases/product-admin-use-cases.js';
 import { SupplierAdminUseCases } from './use-cases/supplier-admin-use-cases.js';
 import { LoyaltyAdminUseCases } from './use-cases/loyalty-admin-use-cases.js';
 import { TransferSettingsAdminUseCases } from './use-cases/transfer-settings-admin-use-cases.js';
+import { ExchangeRateSettingsAdminUseCases } from './use-cases/exchange-rate-settings-admin-use-cases.js';
 import { NewsAdminUseCases } from './use-cases/news-admin-use-cases.js';
 
 export type AdminCmsApplication = {
@@ -24,6 +25,7 @@ export type AdminCmsApplication = {
   suppliers: SupplierAdminUseCases;
   loyalty: LoyaltyAdminUseCases;
   transferSettings: TransferSettingsAdminUseCases;
+  exchangeRateSettings: ExchangeRateSettingsAdminUseCases;
   news: NewsAdminUseCases;
 };
 
@@ -42,6 +44,7 @@ export function createAdminCmsApplication(repositories: AdminCmsRepositories, co
     suppliers: new SupplierAdminUseCases(repositories.suppliers),
     loyalty: new LoyaltyAdminUseCases(repositories.loyalty),
     transferSettings: new TransferSettingsAdminUseCases(repositories.transferSettings),
+    exchangeRateSettings: new ExchangeRateSettingsAdminUseCases(repositories.exchangeRateSettings),
     news: new NewsAdminUseCases(repositories.news),
   };
 }

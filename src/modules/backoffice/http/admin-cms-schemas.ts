@@ -167,3 +167,8 @@ export const transferSettingsWriteSchema = z.object({
     context.addIssue({ code: 'custom', path: ['enabled'], message: 'Para activar la transferencia se requiere banco, titular y CBU o alias' });
   }
 });
+
+export const exchangeRateSettingsWriteSchema = z.object({
+  casa: z.enum(['oficial', 'blue', 'bolsa', 'contadoconliqui', 'mayorista', 'cripto', 'tarjeta']),
+  expectedVersion: z.number().int().min(1),
+});
