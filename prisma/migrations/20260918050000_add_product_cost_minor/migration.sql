@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Product" ADD COLUMN "costMinor" BIGINT NOT NULL DEFAULT 0;

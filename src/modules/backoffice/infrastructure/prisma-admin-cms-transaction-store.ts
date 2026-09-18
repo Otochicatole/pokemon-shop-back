@@ -70,6 +70,7 @@ function mapProduct(value: ProductRecord) {
     id: value.id, sku: value.sku, slug: value.slug, name: value.name, description: value.description,
     kind: value.kind, stockMode: value.stockMode, status: value.status, version: value.version,
     price: money(value.priceMinor),
+    cost: money(value.costMinor),
     inventory: value.inventory ? { onHand: value.inventory.onHand, reserved: value.inventory.reserved, available, version: value.inventory.version } : null,
     pokemonCard: value.pokemonCard,
     images: value.images.map((image) => ({ id: image.id, fileId: image.fileId, url: `/media/public/${image.fileId}`, altText: image.altText, sortOrder: image.sortOrder, createdAt: image.createdAt })),
@@ -380,7 +381,7 @@ export class PrismaAdminCmsTransactionStore {
     return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({ data: {
         sku: input.sku.toUpperCase(), slug: input.slug, name: input.name, description: input.description,
-        kind: input.kind, stockMode: input.stockMode, priceMinor: parseMinor(input.priceMinor), currency: BASE_CURRENCY,
+        kind: input.kind, stockMode: input.stockMode, priceMinor: parseMinor(input.priceMinor), costMinor: parseMinor(input.costMinor ?? '0'), currency: BASE_CURRENCY,
         inventory: { create: { onHand: input.initialStock ?? 0, reserved: 0 } },
         ...(input.pokemonCard ? { pokemonCard: { create: mapCardWrite(input.pokemonCard) } } : {}),
       }, include: productInclude });
@@ -400,7 +401,9 @@ export class PrismaAdminCmsTransactionStore {
         ...(input.sku !== undefined ? { sku: input.sku.toUpperCase() } : {}), ...(input.slug !== undefined ? { slug: input.slug } : {}),
         ...(input.name !== undefined ? { name: input.name } : {}), ...(input.description !== undefined ? { description: input.description } : {}),
         ...(input.kind !== undefined ? { kind: input.kind } : {}), ...(input.stockMode !== undefined ? { stockMode: input.stockMode } : {}),
-        ...(input.priceMinor !== undefined ? { priceMinor: parseMinor(input.priceMinor) } : {}), version: { increment: 1 },
+        ...(input.priceMinor !== undefined ? { priceMinor: parseMinor(input.priceMinor) } : {}),
+        ...(input.costMinor !== undefined ? { costMinor: parseMinor(input.costMinor) } : {}),
+        version: { increment: 1 },
       } });
       if (updated.count !== 1) throw conflict('PRODUCT_CHANGED', 'Product was modified by another administrator');
       const finalKind = input.kind ?? existing.kind;
@@ -797,6 +800,7 @@ export class PrismaAdminCmsTransactionStore {
               kind: write.kind,
               stockMode: write.stockMode,
               priceMinor: parseMinor(write.priceMinor),
+              costMinor: parseMinor(write.costMinor ?? '0'),
               currency: BASE_CURRENCY,
               inventory: { create: { onHand: 0, reserved: 0 } },
               ...(write.pokemonCard ? { pokemonCard: { create: mapCardWrite(write.pokemonCard) } } : {}),

@@ -35,7 +35,7 @@ export const pokemonCardWriteSchema = z.object({
 export const productWriteSchema = z.object({
   sku: z.string().trim().min(1).max(80), slug: z.string().trim().regex(/^[a-z0-9-]+$/).max(120),
   name: z.string().trim().min(1).max(180), description: z.string().trim().max(5000), kind: z.enum(productKinds),
-  stockMode: z.enum(stockModes), priceMinor: z.string().regex(/^\d+$/), initialStock: z.number().int().min(0).max(1_000_000).optional(),
+  stockMode: z.enum(stockModes), priceMinor: z.string().regex(/^\d+$/), costMinor: z.string().regex(/^\d+$/).default('0'), initialStock: z.number().int().min(0).max(1_000_000).optional(),
   stock: z.number().int().min(0).max(1_000_000).optional(), pokemonCard: pokemonCardWriteSchema.nullable().optional(),
 });
 export const productPatchSchema = productWriteSchema.omit({ initialStock: true, stock: true }).partial().extend({ expectedVersion: z.number().int().min(1) });

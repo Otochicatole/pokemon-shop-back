@@ -42,6 +42,7 @@ export type ProductWrite = {
   kind: ProductKindValue;
   stockMode: StockModeValue;
   priceMinor: string;
+  costMinor?: string;
   initialStock?: number;
   pokemonCard?: PokemonCardWrite | null;
 };

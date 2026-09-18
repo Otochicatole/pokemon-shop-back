@@ -97,6 +97,7 @@ export type ProductDto = {
   status: ProductStatusValue;
   version: number;
   price: MoneyDto;
+  cost: MoneyDto;
   inventory: InventoryDto | null;
   pokemonCard: PokemonCardDto | null;
   images: ProductImageDto[];

@@ -46,7 +46,7 @@ export const adminInventorySchema = z.object({
 export const adminProductSchema = z.object({
   id: z.string().uuid(), sku: z.string(), slug: z.string(), name: z.string(), description: z.string(),
   kind: z.enum(productKinds), stockMode: z.enum(stockModes), status: z.enum(productStatuses), version: z.number().int(),
-  price: adminMoneySchema, inventory: adminInventorySchema.nullable(), pokemonCard: adminPokemonCardSchema.nullable(),
+  price: adminMoneySchema, cost: adminMoneySchema, inventory: adminInventorySchema.nullable(), pokemonCard: adminPokemonCardSchema.nullable(),
   images: z.array(adminProductImageSchema), publishedAt: nullableDateTime, archivedAt: nullableDateTime,
   createdAt: dateTime, updatedAt: dateTime,
 });

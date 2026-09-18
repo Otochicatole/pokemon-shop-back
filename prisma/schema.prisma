@@ -565,6 +565,7 @@ model Product {
   kind          ProductKind
   stockMode     StockMode
   priceMinor    BigInt
+  costMinor     BigInt                 @default(0)
   currency      String                 @default("USD")
   status        ProductStatus          @default(DRAFT)
   version       Int                    @default(1)
