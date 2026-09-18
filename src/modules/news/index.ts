@@ -33,6 +33,12 @@ async function getRotationIntervalSeconds(prisma: PrismaClient) {
 
 export function createNewsRouter(prisma: PrismaClient): Router {
   const router = Router();
+  router.use((_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    next();
+  });
   router.get('/', async (req, res) => {
     const { limit } = publicNewsQuerySchema.parse(req.query);
     const now = new Date();
