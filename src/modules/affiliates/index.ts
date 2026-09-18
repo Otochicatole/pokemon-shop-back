@@ -10,7 +10,7 @@ import { AppError, badRequest, conflict, forbidden, notFound } from '../../share
 import { logger } from '../../infrastructure/logger.js';
 import { discardUnattachedFile, saveImage } from '../media/index.js';
 import { BASE_CURRENCY } from '../../shared/currency.js';
-import { getCard, searchCards } from '../tcgdex/index.js';
+import { getCard, listRarities, searchCards } from '../tcgdex/index.js';
 import { affiliateBalance, requestSellerCancellation, refundSellerOrder, resolveAffiliateIssue, resolveCancellation, sellerOrderAllowedActions, transitionSellerOrder } from './affiliate-marketplace-service.js';
 import { createAdminNotifications, createAffiliateListingNotification, createAffiliatePayoutNotification, createBuyerSellerOrderStatusNotification, createSellerOrderAdminNotifications, createSellerOrderStatusNotification, publishNotifications } from '../notifications/index.js';
 import type { SupportRealtimeHub } from '../support/support-realtime.js';
@@ -412,6 +412,10 @@ export function createAffiliateRouter(prisma: PrismaClient, upload: { array(fiel
     activeAffiliateOrThrow(req);
     const query = tcgdexSearchQuerySchema.parse(req.query);
     return res.json({ data: await searchCards(query.q), meta: {} });
+  });
+  router.get('/tcgdex/rarities', async (req, res) => {
+    activeAffiliateOrThrow(req);
+    return res.json({ data: await listRarities(), meta: {} });
   });
   router.get('/tcgdex/cards/:id', async (req, res) => {
     activeAffiliateOrThrow(req);

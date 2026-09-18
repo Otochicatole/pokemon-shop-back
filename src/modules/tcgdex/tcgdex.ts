@@ -112,3 +112,12 @@ export async function getCard(id: string): Promise<TcgDexCardDetails> {
     throw unavailable(error);
   }
 }
+
+export async function listRarities(): Promise<string[]> {
+  try {
+    const rarities = await client.rarity.list();
+    return [...new Set(rarities.map((value) => value.trim()).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'es'));
+  } catch (error) {
+    throw unavailable(error);
+  }
+}
