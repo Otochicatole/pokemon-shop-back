@@ -70,6 +70,11 @@ export type NewsWrite = {
 
 export type NewsPatch = Partial<NewsWrite> & { expectedVersion: number };
 
+export type NewsSettingsWrite = {
+  rotationIntervalSeconds: number;
+  expectedVersion: number;
+};
+
 export type LoyaltyProgramWrite = {
   enabled: boolean;
   spendPerPointMinor: string;

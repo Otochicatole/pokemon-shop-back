@@ -322,6 +322,12 @@ export type NewsDto = {
 };
 export type NewsDetailDto = { news: NewsDto };
 
+export type NewsSettingsDto = {
+  rotationIntervalSeconds: number;
+  version: number;
+  updatedAt: Date;
+};
+
 export type CustomerSummaryDto = OrderCustomerDto & { ordersCount: number; paidTotal: MoneyDto; loyalty: LoyaltyAccountDto };
 export type CustomerDetailDto = {
   customer: OrderCustomerDto & { updatedAt: Date; ordersCount: number; paidTotal: MoneyDto; loyalty: LoyaltyAccountDto; orders: OrderDto[] };

@@ -135,6 +135,10 @@ export const newsWriteSchema = newsFieldsSchema.superRefine((value, context) => 
 export const newsPatchSchema = newsFieldsSchema.partial().extend({ expectedVersion: z.number().int().min(1) }).superRefine((value, context) => {
   if (value.startsAt && value.endsAt && value.startsAt >= value.endsAt) context.addIssue({ code: 'custom', path: ['endsAt'], message: 'La fecha de fin debe ser posterior al inicio' });
 });
+export const newsSettingsWriteSchema = z.object({
+  rotationIntervalSeconds: z.number().int().min(2).max(120),
+  expectedVersion: z.number().int().min(1),
+});
 
 export const customerListQuerySchema = cursorQuery.extend({ search: optionalText(180), status: z.enum(['ACTIVE', 'SUSPENDED']).optional(), verified: booleanQuery });
 export const auditListQuerySchema = cursorQuery.extend({ actorId: z.string().uuid().optional(), action: optionalText(100), entityType: optionalText(100), requestId: optionalText(150), from: dateQuery, to: dateQuery });

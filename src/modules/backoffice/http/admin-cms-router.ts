@@ -13,7 +13,7 @@ import {
   productWriteSchema, refundSchema, shippingZoneWriteSchema, supplierActiveSchema, supplierListQuerySchema,
   supplierPatchSchema, supplierPurchaseParamsSchema, supplierPurchaseWriteSchema, supplierWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
   loyaltyProgramWriteSchema, transferSettingsWriteSchema, tcgdexCardParamsSchema, tcgdexImageImportSchema, tcgdexSearchQuerySchema,
-  newsListQuerySchema, newsWriteSchema, newsPatchSchema,
+  newsListQuerySchema, newsWriteSchema, newsPatchSchema, newsSettingsWriteSchema,
 } from './admin-cms-schemas.js';
 import { getCard, searchCards } from '../../tcgdex/index.js';
 
@@ -172,6 +172,8 @@ export function createAdminCmsRouter({ application, upload, requireAdmin, actorF
   });
 
   router.get('/news', async (req, res) => res.json(await application.news.list(newsListQuerySchema.parse(req.query))));
+  router.get('/news/settings', async (_req, res) => res.json(await application.news.getSettings()));
+  router.patch('/news/settings', async (req, res) => res.json(await application.news.updateSettings(actorFromRequest(req), newsSettingsWriteSchema.parse(req.body))));
   router.get('/news/:id', async (req, res) => res.json(await application.news.get(idParamsSchema.parse(req.params).id)));
   router.post('/news', async (req, res) => res.status(201).json(await application.news.create(actorFromRequest(req), newsWriteSchema.parse(req.body))));
   router.patch('/news/:id', async (req, res) => res.json(await application.news.update(actorFromRequest(req), idParamsSchema.parse(req.params).id, newsPatchSchema.parse(req.body))));

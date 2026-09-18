@@ -345,6 +345,7 @@ model Admin {
   affiliateCancellationResolutions AffiliateCancellationRequest[] @relation("AffiliateCancellationResolutions")
   affiliateProgramUpdates AffiliateProgramSettings[]
   supplierPurchases     SupplierPurchase[]
+  newsSettingsUpdates   NewsSettings[]
 }
 
 model LoyaltyProgram {
@@ -1175,6 +1176,18 @@ model NewsItem {
   coverFile    StoredFile? @relation(fields: [coverFileId], references: [id], onDelete: Restrict)
 
   @@index([active, sortOrder, startsAt, endsAt])
+}
+
+model NewsSettings {
+  id                       String   @id @default("default")
+  rotationIntervalSeconds  Int      @default(5)
+  version                  Int      @default(1)
+  updatedById              String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+  updatedBy                Admin?   @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([updatedById])
 }
 
 model FileCleanupJob {

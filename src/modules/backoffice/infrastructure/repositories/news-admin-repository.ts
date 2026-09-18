@@ -1,5 +1,5 @@
 import type { NewsAdminRepository } from '../../application/ports.js';
-import type { AdminActor, NewsListQuery, NewsPatch, NewsWrite } from '../../domain/admin-cms.js';
+import type { AdminActor, NewsListQuery, NewsPatch, NewsSettingsWrite, NewsWrite } from '../../domain/admin-cms.js';
 
 export class NewsAdminRepositoryAdapter implements NewsAdminRepository {
   public constructor(private readonly source: NewsAdminRepository) {}
@@ -10,4 +10,6 @@ export class NewsAdminRepositoryAdapter implements NewsAdminRepository {
   deleteNews(actor: AdminActor, id: string, expectedVersion: number) { return this.source.deleteNews(actor, id, expectedVersion); }
   setNewsCover(actor: AdminActor, id: string, expectedVersion: number, coverFileId: string) { return this.source.setNewsCover(actor, id, expectedVersion, coverFileId); }
   clearNewsCover(actor: AdminActor, id: string, expectedVersion: number) { return this.source.clearNewsCover(actor, id, expectedVersion); }
+  getNewsSettings() { return this.source.getNewsSettings(); }
+  updateNewsSettings(actor: AdminActor, input: NewsSettingsWrite) { return this.source.updateNewsSettings(actor, input); }
 }

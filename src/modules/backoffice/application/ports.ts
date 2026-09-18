@@ -6,13 +6,13 @@ import type {
   ShippingZoneResultDto, TransferReviewDto,
   SupplierActiveMutationDto, SupplierDetailDto, SupplierDto, SupplierPurchaseDetailDto, SupplierPurchaseDto,
   LoyaltyProgramDto, TransferSettingsDto,
-  NewsDetailDto, NewsDto,
+  NewsDetailDto, NewsDto, NewsSettingsDto,
 } from './dtos.js';
 import type {
   AdminActor, AuditListQuery, CustomerListQuery, OrderListQuery, OrderStatusValue,
   ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierPurchaseWrite, SupplierWrite,
   LoyaltyProgramWrite, TransferSettingsWrite,
-  NewsListQuery, NewsPatch, NewsWrite,
+  NewsListQuery, NewsPatch, NewsWrite, NewsSettingsWrite,
 } from '../domain/admin-cms.js';
 
 export interface DashboardReader {
@@ -104,6 +104,8 @@ export interface NewsAdminRepository {
   deleteNews(actor: AdminActor, id: string, expectedVersion: number): Promise<void>;
   setNewsCover(actor: AdminActor, id: string, expectedVersion: number, coverFileId: string): Promise<NewsDetailDto>;
   clearNewsCover(actor: AdminActor, id: string, expectedVersion: number): Promise<NewsDetailDto>;
+  getNewsSettings(): Promise<NewsSettingsDto>;
+  updateNewsSettings(actor: AdminActor, input: NewsSettingsWrite): Promise<NewsSettingsDto>;
 }
 
 export type AdminCmsRepositories = {

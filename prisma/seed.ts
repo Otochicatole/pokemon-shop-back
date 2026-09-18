@@ -1141,6 +1141,11 @@ async function main() {
   }
   await seedSupplierPurchases({ adminId: admin.id, now });
   await seedNews(now);
+  await prisma.newsSettings.upsert({
+    where: { id: 'default' },
+    update: {},
+    create: { id: 'default', rotationIntervalSeconds: 5 },
+  });
   const affiliateSeed = await seedAffiliateMarketplace({ adminId: admin.id, now });  await prisma.transferSettings.upsert({
     where: { id: 'default' },
     update: {

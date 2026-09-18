@@ -5,7 +5,7 @@ import type { PickupPointWrite, ShippingZoneWrite } from '../application/ports.j
 import type { JsonValue, NewsDto, OrderDto, OrderStatusMutationDto, RefundDto, SupplierDto, SupplierPurchaseDto, SupplierPurchaseItemDto, TransferReviewDto } from '../application/dtos.js';
 import type {
   AdminActor, AuditListQuery, CustomerListQuery, OrderListQuery, OrderStatusValue,
-  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierPurchaseWrite, SupplierWrite, LoyaltyProgramWrite, TransferSettingsWrite, NewsListQuery, NewsPatch, NewsWrite,
+  ProductListQuery, ProductPatch, ProductWrite, SupplierListQuery, SupplierPatch, SupplierPurchaseWrite, SupplierWrite, LoyaltyProgramWrite, TransferSettingsWrite, NewsListQuery, NewsPatch, NewsSettingsWrite, NewsWrite,
 } from '../domain/admin-cms.js';
 import { allowedOrderTransitions } from '../domain/admin-cms.js';
 import { getLoyaltyProgram, mapLoyaltyProgram, releaseOrderLoyaltyReservation, reverseOrderLoyalty, settleOrderLoyalty } from '../../loyalty/index.js';
@@ -178,6 +178,25 @@ function mapNews(value: NewsRecord): NewsDto {
 
 function validateNewsDates(startsAt: Date | null, endsAt: Date | null) {
   if (startsAt && endsAt && startsAt >= endsAt) throw badRequest('INVALID_NEWS_WINDOW', 'La fecha de fin debe ser posterior al inicio');
+}
+
+const NEWS_SETTINGS_ID = 'default';
+const DEFAULT_NEWS_ROTATION_SECONDS = 5;
+
+function mapNewsSettings(value: { rotationIntervalSeconds: number; version: number; updatedAt: Date }) {
+  return {
+    rotationIntervalSeconds: value.rotationIntervalSeconds,
+    version: value.version,
+    updatedAt: value.updatedAt,
+  };
+}
+
+async function ensureNewsSettings(db: PrismaClient | Prisma.TransactionClient) {
+  return db.newsSettings.upsert({
+    where: { id: NEWS_SETTINGS_ID },
+    update: {},
+    create: { id: NEWS_SETTINGS_ID, rotationIntervalSeconds: DEFAULT_NEWS_ROTATION_SECONDS },
+  });
 }
 
 async function scheduleFileCleanup(tx: Prisma.TransactionClient, file: { id: string; storageKey: string } | null | undefined) {
@@ -625,6 +644,35 @@ export class PrismaAdminCmsTransactionStore {
       await tx.auditLog.create({ data: auditData(actor, 'NEWS_COVER_CLEARED', 'NewsItem', id, { fromVersion: expectedVersion }) });
       const news = await tx.newsItem.findUniqueOrThrow({ where: { id } });
       return { news: mapNews(news) };
+    }));
+  }
+
+  async getNewsSettings() {
+    return mapNewsSettings(await ensureNewsSettings(this.prisma));
+  }
+
+  updateNewsSettings(actor: AdminActor, input: NewsSettingsWrite) {
+    return this.coordinator.run(() => this.prisma.$transaction(async (tx) => {
+      await ensureNewsSettings(tx);
+      const changed = await tx.newsSettings.updateMany({
+        where: { id: NEWS_SETTINGS_ID, version: input.expectedVersion },
+        data: {
+          rotationIntervalSeconds: input.rotationIntervalSeconds,
+          updatedById: actor.adminId,
+          version: { increment: 1 },
+        },
+      });
+      if (changed.count !== 1) {
+        if (!await tx.newsSettings.count({ where: { id: NEWS_SETTINGS_ID } })) throw notFound('News settings not found');
+        throw conflict('NEWS_SETTINGS_CHANGED', 'La configuración de noticias fue modificada por otro administrador');
+      }
+      const settings = await tx.newsSettings.findUniqueOrThrow({ where: { id: NEWS_SETTINGS_ID } });
+      await tx.auditLog.create({ data: auditData(actor, 'NEWS_SETTINGS_UPDATED', 'NewsSettings', settings.id, {
+        rotationIntervalSeconds: settings.rotationIntervalSeconds,
+        fromVersion: input.expectedVersion,
+        toVersion: settings.version,
+      }) });
+      return mapNewsSettings(settings);
     }));
   }
 

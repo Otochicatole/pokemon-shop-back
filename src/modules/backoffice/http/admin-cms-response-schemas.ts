@@ -237,6 +237,11 @@ export const adminNewsSchema = z.object({
   startsAt: nullableDateTime, endsAt: nullableDateTime, version: z.number().int(), createdAt: dateTime, updatedAt: dateTime,
 });
 export const adminNewsDetailDataSchema = z.object({ news: adminNewsSchema });
+export const adminNewsSettingsSchema = z.object({
+  rotationIntervalSeconds: z.number().int().min(2).max(120),
+  version: z.number().int().positive(),
+  updatedAt: dateTime,
+});
 
 export const adminCustomerSummarySchema = adminOrderCustomerSchema.extend({ ordersCount: z.number().int(), paidTotal: adminMoneySchema, loyalty: adminLoyaltyAccountSchema });
 export const adminCustomerDetailDataSchema = z.object({
