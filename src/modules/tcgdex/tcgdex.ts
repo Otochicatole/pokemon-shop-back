@@ -2,7 +2,7 @@ import TCGdex, { Query, type CardModel, type CardResumeModel } from '@tcgdex/sdk
 import { logger } from '../../infrastructure/logger.js';
 import { AppError, notFound } from '../../shared/errors.js';
 
-const client = new TCGdex('es');
+const client = new TCGdex('en');
 client.setCacheTTL(300);
 
 export type TcgDexCardSummary = {
@@ -28,7 +28,7 @@ export type TcgDexCardDetails = TcgDexCardSummary & {
   firstEdition: boolean;
   holo: boolean;
   effect: string;
-  language: 'Español';
+  language: string;
 };
 
 function imageUrl(card: CardResumeModel) {
@@ -105,7 +105,7 @@ export async function getCard(id: string): Promise<TcgDexCardDetails> {
       firstEdition: Boolean(value.variants?.firstEdition),
       holo: Boolean(value.variants?.holo),
       effect: value.effect ?? '',
-      language: 'Español',
+      language: 'Inglés',
     };
   } catch (error) {
     if (error instanceof AppError) throw error;
@@ -116,7 +116,7 @@ export async function getCard(id: string): Promise<TcgDexCardDetails> {
 export async function listRarities(): Promise<string[]> {
   try {
     const rarities = await client.rarity.list();
-    return [...new Set(rarities.map((value) => value.trim()).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'es'));
+    return [...new Set(rarities.map((value) => String(value).trim()).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'en'));
   } catch (error) {
     throw unavailable(error);
   }
