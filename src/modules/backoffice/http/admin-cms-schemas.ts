@@ -51,7 +51,10 @@ export const imageUploadFieldsSchema = z.object({
 });
 export const imagePatchSchema = expectedVersionSchema.extend({ altText: z.string().trim().max(255).nullable() });
 export const imageOrderSchema = expectedVersionSchema.extend({ imageIds: z.array(z.string().uuid()).max(8) });
-export const inventoryAdjustmentSchema = z.object({ delta: z.number().int().min(-1_000_000).max(1_000_000).refine((value) => value !== 0, 'Delta cannot be zero'), reason: z.string().trim().min(3).max(500) });
+export const inventoryAdjustmentSchema = z.object({
+  delta: z.number().int().min(-1_000_000).max(1_000_000).refine((value) => value !== 0, 'Delta cannot be zero'),
+  reason: z.string().trim().max(500).optional().default(''),
+});
 export const cursorQuerySchema = cursorQuery;
 
 export const orderListQuerySchema = cursorQuery.extend({
