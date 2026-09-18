@@ -41,7 +41,11 @@ export function createCatalogV2Router(repository: CatalogRepository): Router {
     res.setHeader('Expires', '0');
     next();
   });
-  router.get('/filters', async (_req, res) => res.json({ data: await getFilters.execute(), meta: {} }));
+  router.get('/filters', async (req, res) => {
+    const parsed = toCatalogQuery(req.query);
+    const { sort: _sort, cursor: _cursor, limit: _limit, ...filters } = parsed;
+    return res.json({ data: await getFilters.execute(filters), meta: {} });
+  });
   router.get('/products', async (req, res) => { const result = await list.execute(toCatalogQuery(req.query)); return res.json({ data: result.products, meta: { nextCursor: result.nextCursor } }); });
   router.get('/products/:slug', async (req, res) => { const product = await get.execute(String(req.params.slug)); if (!product) throw notFound('Product not found'); return res.json({ data: product }); });
   return router;

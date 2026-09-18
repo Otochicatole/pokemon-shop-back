@@ -28,10 +28,12 @@ export interface CatalogQuery {
   limit: number;
 }
 
+export type CatalogFiltersQuery = Omit<CatalogQuery, 'sort' | 'cursor' | 'limit'>;
+
 export interface CatalogRepository {
   listPublished(query: CatalogQuery): Promise<{ products: CatalogProduct[]; nextCursor: string | null }>;
   findPublishedBySlug(slug: string): Promise<CatalogProduct | null>;
-  getFilters(): Promise<CatalogFilters>;
+  getFilters(query?: CatalogFiltersQuery): Promise<CatalogFilters>;
 }
 
 export class ListProducts {
@@ -46,5 +48,5 @@ export class GetProduct {
 
 export class GetCatalogFilters {
   public constructor(private readonly repository: CatalogRepository) {}
-  public execute() { return this.repository.getFilters(); }
+  public execute(query: CatalogFiltersQuery = {}) { return this.repository.getFilters(query); }
 }

@@ -67,11 +67,18 @@ export interface CatalogFilters {
   kinds: CatalogFacetOption[];
   pokemonTypes: CatalogFacetOption[];
   sets: CatalogFacetOption[];
+  setCodes: CatalogFacetOption[];
   rarities: CatalogFacetOption[];
   conditions: CatalogFacetOption[];
   languages: CatalogFacetOption[];
   finishes: CatalogFacetOption[];
   editions: CatalogFacetOption[];
   gradingCompanies: CatalogFacetOption[];
+  availability: {
+    inStock: number;
+    outOfStock: number;
+    graded: number;
+    ungraded: number;
+  };
   priceRange: { minMinor: string | null; maxMinor: string | null };
 }
