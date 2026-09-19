@@ -15,7 +15,7 @@ import {
   loyaltyProgramWriteSchema, transferSettingsWriteSchema, exchangeRateSettingsWriteSchema, tcgdexCardParamsSchema, tcgdexImageImportSchema, tcgdexSearchQuerySchema,
   newsListQuerySchema, newsWriteSchema, newsPatchSchema, newsSettingsWriteSchema,
 } from './admin-cms-schemas.js';
-import { getCard, listRarities, searchCards } from '../../tcgdex/index.js';
+import { getCard, listRarities, listSets, searchCards } from '../../tcgdex/index.js';
 
 const noContent = (response: import('express').Response) => response.status(204).send();
 const tcgdexImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -73,6 +73,7 @@ export function createAdminCmsRouter({ application, upload, requireAdmin, actorF
     return res.json({ data: await searchCards(query.q), meta: {} });
   });
   router.get('/tcgdex/rarities', async (_req, res) => res.json({ data: await listRarities(), meta: {} }));
+  router.get('/tcgdex/sets', async (_req, res) => res.json({ data: await listSets(), meta: {} }));
   router.get('/tcgdex/cards/:id', async (req, res) => {
     const params = tcgdexCardParamsSchema.parse(req.params);
     return res.json({ data: { card: await getCard(params.id) }, meta: {} });

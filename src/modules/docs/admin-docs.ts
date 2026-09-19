@@ -99,6 +99,7 @@ export function registerAdminCmsPaths(registry: OpenAPIRegistry, { problemSchema
 
   registry.registerPath({ method: 'get', path: '/api/v2/admin/tcgdex/cards', tags: ['Admin products'], summary: 'Search the TCGdex card catalog for product autofill', security, request: { query: tcgdexSearchQuerySchema }, responses: ok('Matching TCGdex cards', z.array(adminTcgdexCardSummarySchema)) });
   registry.registerPath({ method: 'get', path: '/api/v2/admin/tcgdex/rarities', tags: ['Admin products'], summary: 'List TCGdex rarities for product forms', security, responses: ok('TCGdex rarities', z.array(z.string())) });
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/tcgdex/sets', tags: ['Admin products'], summary: 'List TCGdex sets for product forms', security, responses: ok('TCGdex sets', z.array(z.object({ id: z.string(), name: z.string() }))) });
   registry.registerPath({ method: 'get', path: '/api/v2/admin/tcgdex/cards/{id}', tags: ['Admin products'], summary: 'Read a full TCGdex card for product autofill', security, request: { params: tcgdexCardParamsSchema }, responses: ok('TCGdex card details', adminTcgdexCardDataSchema) });
 
   registry.registerPath({ method: 'get', path: '/api/v2/admin/products', tags: ['Admin products'], summary: 'List products in every publication state', security, request: { query: productListQuerySchema }, responses: ok('Cursor page of products', z.array(adminProductSchema)) });

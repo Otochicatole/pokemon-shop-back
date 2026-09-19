@@ -1,2 +1,2 @@
-export { getCard, listRarities, searchCards } from './tcgdex.js';
-export type { TcgDexCardDetails, TcgDexCardSummary } from './tcgdex.js';
+export { getCard, listRarities, listSets, searchCards } from './tcgdex.js';
+export type { TcgDexCardDetails, TcgDexCardSummary, TcgDexSetOption } from './tcgdex.js';

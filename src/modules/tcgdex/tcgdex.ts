@@ -121,3 +121,21 @@ export async function listRarities(): Promise<string[]> {
     throw unavailable(error);
   }
 }
+
+export type TcgDexSetOption = { id: string; name: string };
+
+export async function listSets(): Promise<TcgDexSetOption[]> {
+  try {
+    const sets = await client.set.list();
+    const options = sets
+      .map((set) => ({
+        id: String(set.id ?? '').trim(),
+        name: String(set.name ?? '').trim(),
+      }))
+      .filter((set) => set.id && set.name);
+    options.sort((left, right) => left.name.localeCompare(right.name, 'en', { sensitivity: 'base' }));
+    return options;
+  } catch (error) {
+    throw unavailable(error);
+  }
+}
