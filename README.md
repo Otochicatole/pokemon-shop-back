@@ -48,14 +48,23 @@ El catálogo público expone `/api/v2/catalog/products` y `/api/v2/catalog/filte
 
 El proyecto está diseñado para una sola instancia mientras use SQLite y almacenamiento local. Los puertos de persistencia y archivos permiten migrar posteriormente a PostgreSQL, Redis y almacenamiento de objetos.
 
-## Datos de desarrollo
+## Datos iniciales
 
-`pnpm db:seed` es idempotente y crea diecisiete productos publicados con imágenes locales, tres proveedores de ejemplo (dos activos y uno inactivo), siete órdenes representativas para el CMS (incluido un comprobante privado), los once tipos TCG, accesorios, metadatos de colección, inventario, retiro, envíos y los accesos de prueba:
+`pnpm db:seed` es idempotente y deja la tienda vacía: un administrador, reglas de lealtad por defecto, transferencia bancaria desactivada y sin productos, pedidos, noticias, envíos ni afiliados. En el VPS usá `SEED_ADMIN_EMAIL` y `SEED_ADMIN_PASSWORD` (mínimo 12 caracteres) y después cargá catálogo, zonas de envío, retiro y CBU desde el CMS.
+
+Para un entorno local con catálogo de demostración:
+
+```bash
+pnpm db:seed:demo
+```
+
+Esa seed demo crea diecisiete productos publicados con imágenes locales, tres proveedores de ejemplo, órdenes representativas para el CMS, envíos, retiro y los accesos de prueba:
 
 - Usuario: `user@cardshop.test` / `User123!seed-card-shop`
 - Admin: `admin@cardshop.test` / `Admin123!seed-card-shop`
+- Afiliado: `affiliate@cardshop.test` / `Affiliate123!seed-card-shop`
 
-El acceso administrativo usa únicamente email y contraseña. Estas credenciales son exclusivamente para desarrollo y deben cambiarse antes de cualquier entorno compartido.
+El acceso administrativo usa únicamente email y contraseña. Las credenciales por defecto son exclusivamente para desarrollo y deben cambiarse antes de cualquier entorno compartido.
 
 Los administradores se crean únicamente desde la terminal con `pnpm admin:create`; no existe registro administrativo por HTTP. El comando solicita email, nombre opcional y una contraseña de al menos 12 caracteres.
 
