@@ -20,6 +20,7 @@ const rawSchema = z.object({
   MERCADOPAGO_ACCESS_TOKEN: z.string().optional(),
   MERCADOPAGO_WEBHOOK_SECRET: z.string().optional(),
   MERCADOPAGO_COLLECTOR_ID: z.string().optional(),
+  POKEMON_TCG_API_KEY: z.string().trim().optional(),
   DOLARAPI_BASE_URL: z.string().url().default('https://dolarapi.com/v1/dolares'),
   DOLARAPI_URL: z.string().url().optional(),
   DOLARAPI_TIMEOUT_MS: z.coerce.number().int().min(500).max(15_000).default(3_000),

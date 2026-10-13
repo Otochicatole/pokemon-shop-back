@@ -7,7 +7,7 @@ import {
   pickupPointWriteSchema, productImageParamsSchema, productListQuerySchema, productPatchSchema,
   productWriteSchema, refundSchema, shippingZoneWriteSchema, supplierActiveSchema, supplierListQuerySchema,
   supplierPatchSchema, supplierPurchaseParamsSchema, supplierPurchaseWriteSchema, supplierWriteSchema, transferReceiptParamsSchema, transferReviewSchema,
-  tcgdexCardParamsSchema, tcgdexImageImportSchema, tcgdexSearchQuerySchema,
+  pokemonTcgCardParamsSchema, pokemonTcgImageImportSchema, pokemonTcgSearchQuerySchema,
   newsListQuerySchema, newsWriteSchema, newsPatchSchema, newsSettingsWriteSchema,
   adminActiveMutationDataSchema, adminAuditEntrySchema, adminCustomerDetailDataSchema, adminCustomerSummarySchema,
   adminDashboardDataSchema, adminEnvelopeSchema, adminFulfillmentDataSchema, adminFullRefundDataSchema,
@@ -15,8 +15,8 @@ import {
   adminOrderStatusDataSchema, adminPickupPointResultDataSchema, adminProductDetailDataSchema, adminProductImageOrderDataSchema,
   adminProductImagesDataSchema, adminProductImageUpdateDataSchema, adminProductSchema, adminProductStatusDataSchema,
   adminShippingZoneResultDataSchema, adminTransferReviewDataSchema,
-  adminSupplierActiveMutationDataSchema, adminSupplierDetailDataSchema, adminSupplierPurchaseDetailDataSchema, adminSupplierPurchaseSchema, adminSupplierSchema, adminTcgdexCardDataSchema, adminTransferSettingsSchema,
-  adminTcgdexCardSummarySchema, adminNewsSchema, adminNewsDetailDataSchema, adminNewsSettingsSchema,
+  adminSupplierActiveMutationDataSchema, adminSupplierDetailDataSchema, adminSupplierPurchaseDetailDataSchema, adminSupplierPurchaseSchema, adminSupplierSchema, adminPokemonTcgCardDataSchema, adminTransferSettingsSchema,
+  adminPokemonTcgCardSummarySchema, adminNewsSchema, adminNewsDetailDataSchema, adminNewsSettingsSchema,
 } from '../backoffice/index.js';
 
 type Options = { problemSchema: z.ZodType; moneySchema: z.ZodType };
@@ -97,10 +97,10 @@ export function registerAdminCmsPaths(registry: OpenAPIRegistry, { problemSchema
   registry.registerPath({ method: 'patch', path: '/api/v2/admin/affiliates/settings', tags: ['Admin affiliates'], summary: 'Update the global commission and automatic completion window', security, request: { headers: csrf, body: json(z.object({ expectedVersion: z.number().int().min(1), commissionBps: z.number().int().min(0).max(10000), autoCompleteDays: z.number().int().min(1).max(90) })) }, responses: ok('Affiliate settings updated', affiliateSettings) });
   registry.registerPath({ method: 'post', path: '/api/v2/admin/affiliates/ledger-adjustments', tags: ['Admin affiliates'], summary: 'Apply an audited manual affiliate ledger adjustment', security, request: { headers: csrf, body: json(z.object({ affiliateId: z.string().uuid(), bucket: z.enum(['PENDING', 'AVAILABLE', 'RESERVED', 'PAID']), amountMinor: z.coerce.bigint(), note: z.string().min(3).max(500), dedupeKey: z.string().min(3).max(150).optional() })) }, responses: ok('Affiliate ledger adjusted', z.record(z.string(), z.unknown())) });
 
-  registry.registerPath({ method: 'get', path: '/api/v2/admin/tcgdex/cards', tags: ['Admin products'], summary: 'Search the TCGdex card catalog for product autofill', security, request: { query: tcgdexSearchQuerySchema }, responses: ok('Matching TCGdex cards', z.array(adminTcgdexCardSummarySchema)) });
-  registry.registerPath({ method: 'get', path: '/api/v2/admin/tcgdex/rarities', tags: ['Admin products'], summary: 'List TCGdex rarities for product forms', security, responses: ok('TCGdex rarities', z.array(z.string())) });
-  registry.registerPath({ method: 'get', path: '/api/v2/admin/tcgdex/sets', tags: ['Admin products'], summary: 'List TCGdex sets for product forms', security, responses: ok('TCGdex sets', z.array(z.object({ id: z.string(), name: z.string() }))) });
-  registry.registerPath({ method: 'get', path: '/api/v2/admin/tcgdex/cards/{id}', tags: ['Admin products'], summary: 'Read a full TCGdex card for product autofill', security, request: { params: tcgdexCardParamsSchema }, responses: ok('TCGdex card details', adminTcgdexCardDataSchema) });
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/pokemon-tcg/cards', tags: ['Admin products'], summary: 'Search the Pokémon TCG card catalog for product autofill', security, request: { query: pokemonTcgSearchQuerySchema }, responses: ok('Matching Pokémon TCG cards', z.array(adminPokemonTcgCardSummarySchema)) });
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/pokemon-tcg/rarities', tags: ['Admin products'], summary: 'List local editable rarity suggestions for product forms', description: 'Returns local suggestions, not provider metadata. Rarity fields remain editable.', security, responses: ok('Local rarity suggestions', z.array(z.string())) });
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/pokemon-tcg/sets', tags: ['Admin products'], summary: 'List Pokémon TCG sets for product forms', security, responses: ok('Pokémon TCG sets', z.array(z.object({ id: z.string(), name: z.string() }))) });
+  registry.registerPath({ method: 'get', path: '/api/v2/admin/pokemon-tcg/cards/{id}', tags: ['Admin products'], summary: 'Read Pokémon TCG card details and nullable USD market price for product autofill', description: 'Uses pokemon-tcg.dev server-side. marketPrice contains USD cents, source, variant and provider update timestamp when a market quote is available; otherwise it is null.', security, request: { params: pokemonTcgCardParamsSchema }, responses: ok('Pokémon TCG card details', adminPokemonTcgCardDataSchema) });
 
   registry.registerPath({ method: 'get', path: '/api/v2/admin/products', tags: ['Admin products'], summary: 'List products in every publication state', security, request: { query: productListQuerySchema }, responses: ok('Cursor page of products', z.array(adminProductSchema)) });
   registry.registerPath({ method: 'post', path: '/api/v2/admin/products', tags: ['Admin products'], summary: 'Create a draft product and initial inventory', security, request: { headers: csrf, body: json(productWriteSchema) }, responses: created('Draft product created', adminProductDetailDataSchema) });
@@ -115,7 +115,7 @@ export function registerAdminCmsPaths(registry: OpenAPIRegistry, { problemSchema
     request: { params: idParamsSchema, headers: csrf, body: { required: true, content: { 'multipart/form-data': { schema: imageUploadFieldsSchema.extend({ images: z.array(z.string().openapi({ format: 'binary' })).min(1).max(8) }) } } } },
     responses: created('Images decoded, sanitized and attached', adminProductImagesDataSchema),
   });
-  registry.registerPath({ method: 'post', path: '/api/v2/admin/products/{id}/tcgdex-image', tags: ['Admin products'], summary: 'Download, sanitize and attach an official TCGdex card image', security, request: { params: idParamsSchema, headers: csrf, body: json(tcgdexImageImportSchema) }, responses: created('TCGdex image attached', adminProductImagesDataSchema) });
+  registry.registerPath({ method: 'post', path: '/api/v2/admin/products/{id}/pokemon-tcg-image', tags: ['Admin products'], summary: 'Download, sanitize and attach a Pokémon TCG card image', description: 'Accepts only HTTPS images hosted on img.pokemon-tcg.dev without credentials or a non-default port. Redirects are rejected. JPEG, PNG and WebP downloads are limited to 10 MiB before media sanitization.', security, request: { params: idParamsSchema, headers: csrf, body: json(pokemonTcgImageImportSchema) }, responses: created('Pokémon TCG image attached', adminProductImagesDataSchema) });
   registry.registerPath({ method: 'patch', path: '/api/v2/admin/products/{id}/images/{imageId}', tags: ['Admin products'], summary: 'Update accessible image text', security, request: { params: productImageParamsSchema, headers: csrf, body: json(imagePatchSchema) }, responses: ok('Image metadata updated', adminProductImageUpdateDataSchema) });
   registry.registerPath({ method: 'put', path: '/api/v2/admin/products/{id}/images/order', tags: ['Admin products'], summary: 'Reorder all active images; position zero is the cover', security, request: { params: idParamsSchema, headers: csrf, body: json(imageOrderSchema) }, responses: ok('Images reordered', adminProductImageOrderDataSchema) });
   registry.registerPath({ method: 'delete', path: '/api/v2/admin/products/{id}/images/{imageId}', tags: ['Admin products'], summary: 'Retire an image using optimistic concurrency while retaining referenced order media', security, request: { params: productImageParamsSchema, headers: csrf, body: json(expectedVersionSchema) }, responses: { 204: { description: 'Image retired and durable cleanup scheduled' }, ...errors } });

@@ -19,6 +19,14 @@ Swagger queda disponible en `http://localhost:3000/docs` y el documento OpenAPI 
 
 Con el frontend ejecutándose en el puerto 3001, el CMS se abre en `http://localhost:3001/admin/login`.
 
+### Autocompletado de cartas y precios
+
+Configurá `POKEMON_TCG_API_KEY` en el `.env` del backend con la clave privada de [pokemon-tcg.dev](https://pokemon-tcg.dev/docs) y reiniciá el servidor. La clave se envía únicamente desde el servidor como Bearer token a `https://api.pokemon-tcg.dev/v1`; nunca se expone en el frontend. `.env` está excluido de Git y `.env.example` contiene sólo el nombre de la variable.
+
+Productos, compras a proveedores y publicaciones de afiliados consultan `/api/v2/admin/pokemon-tcg/*` o `/api/v2/affiliate/pokemon-tcg/*`. La búsqueda trae nombre, colección, número, imagen, rareza y tipos elementales; seleccionar una carta consulta su detalle con `include_prices=true` y completa también el precio de venta de referencia en USD, editable antes de guardar. `set_code` completa Código de set y `set_name` completa Colección / set, respetando los valores del proveedor incluso cuando ambos coinciden. El costo de compra no cambia. Se prioriza TCGPlayer y, dentro de una fuente, las variantes normal, holofoil y reverse-holofoil; los precios graduados o en otras monedas no se aplican. La referencia informa fuente, variante y fecha. Si no hay precio USD válido se conserva el valor del formulario.
+
+`rarity` conserva la etiqueta exacta del proveedor y se selecciona automáticamente, incluso si no estaba en las opciones locales. La rareza sigue siendo un selector en todos los formularios. `types` completa Tipo / atributo con el primer tipo elemental informado por la carta. Si la rareza es `null` o los tipos están vacíos, se conserva la información manual; la etiqueta literal `None` sí se considera un valor informado. Descripción y primera edición no están disponibles en esta API. La búsqueda utiliza inglés; las cartas de región japonesa se identifican como japonés. Las imágenes se descargan exclusivamente de `img.pokemon-tcg.dev` y se sanitizan antes de guardarse. Las consultas se cachean por cinco minutos (colecciones: 24 horas) y se respeta `Retry-After` ante límites temporales del proveedor. TCGdex fue retirado por completo; no hay fallback al proveedor anterior.
+
 ### Mercado Pago Checkout Pro
 
 El checkout nuevo usa Orders API y convierte los importes internos en USD a ARS con la cotización `venta` de DolarAPI. Está desactivado por defecto. Para habilitarlo, configurá `MERCADOPAGO_ENABLED=true`, `MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_WEBHOOK_SECRET`, `MERCADOPAGO_COLLECTOR_ID`, `PUBLIC_API_URL` y `PUBLIC_WEB_URL` en el backend. En producción ambas URLs deben ser públicas y usar HTTPS. Configurá en Mercado Pago el evento **Order (Mercado Pago)** apuntando a `${PUBLIC_API_URL}/api/v2/webhooks/mercado-pago`.

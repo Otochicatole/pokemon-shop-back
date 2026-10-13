@@ -7,7 +7,6 @@
       "dependencies": {
         "@asteasolutions/zod-to-openapi": "9.1.0",
         "@prisma/client": "6.19.3",
-        "@tcgdex/sdk": "^2.9.0",
         "argon2": "0.45.1",
         "cookie-parser": "1.4.7",
         "cors": "2.8.5",
@@ -62,14 +61,6 @@
     "@babel/types": ["@babel/types@7.29.8", "", { "dependencies": { "@babel/helper-string-parser": "7.29.7", "@babel/helper-validator-identifier": "7.29.7" } }, "sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg=="],
 
     "@bcoe/v8-coverage": ["@bcoe/v8-coverage@1.0.2", "", {}, "sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA=="],
-
-    "@cachex/core": ["@cachex/core@1.0.1", "", { "dependencies": { "@dzeio/object-util": "^1.8.3" } }, "sha512-sHynwjF9hKIvwg8rTUdvA7MOUMcUC5Mq0dpynPBILRS+IPvsHcE4Cb2uRSs0/I2nxO7NQp9p+xHYistdfJJSwg=="],
-
-    "@cachex/memory": ["@cachex/memory@1.0.1", "", { "dependencies": { "@cachex/core": "^1" } }, "sha512-KWUTdCCXhIlAkJaVZMhUh9kD0uq8PxC3Z34Q3lMGZOAV6FXP/cOMW89ALrWX3VkoRrrM4R6MIMO+amZNOvEqgw=="],
-
-    "@cachex/web-storage": ["@cachex/web-storage@1.0.1", "", { "dependencies": { "@cachex/core": "^1" } }, "sha512-E8Xa9qDZgNgr+lcj3eixowg7PH2CVZbp3huuoc5xVVTtwYrZi5YqbHBG12yG3r6C6Fts/2Yoq6cbVBSm6c8VRA=="],
-
-    "@dzeio/object-util": ["@dzeio/object-util@1.9.2", "", {}, "sha512-L3EBaHnDmf/+LAC61eCgWzcGXjbaOoFB4ml3eeOFxKlVlO6IZ2BpdstoqgAfLNKqdy4Ixp7TlP5z4ohdPxfSLg=="],
 
     "@emnapi/runtime": ["@emnapi/runtime@1.11.3", "", { "dependencies": { "tslib": "2.8.1" } }, "sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA=="],
 
@@ -298,8 +289,6 @@
     "@scarf/scarf": ["@scarf/scarf@1.4.0", "", {}, "sha512-xxeapPiUXdZAE3che6f3xogoJPeZgig6omHEy1rIY5WVsB3H2BHNnZH+gHG6x91SCWyQCzWGsuL2Hh3ClO5/qQ=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
-
-    "@tcgdex/sdk": ["@tcgdex/sdk@2.9.0", "", { "dependencies": { "@cachex/memory": "^1", "@cachex/web-storage": "^1", "@dzeio/object-util": "^1" } }, "sha512-bSX4Bvj3jtxgpEgX/9gW9MOQk64tWozEF1Am1NJd7ruRqpich8wgf6rZkyQsHWy0Gnl7BBNWZCIDe4+izCcwXA=="],
 
     "@types/body-parser": ["@types/body-parser@1.19.6", "", { "dependencies": { "@types/connect": "3.4.38", "@types/node": "24.3.0" } }, "sha512-HLFeCYgz89uk22N5Qg3dvGvsv46B8GLvKKo1zKG4NybA8U2DiEO3w9lqGg29t/tfLRJpJ6iQxnVw4OnB7MoM9g=="],
 
