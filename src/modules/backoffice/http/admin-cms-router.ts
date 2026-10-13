@@ -14,7 +14,7 @@ import {
   loyaltyProgramWriteSchema, transferSettingsWriteSchema, exchangeRateSettingsWriteSchema, pokemonTcgCardParamsSchema, pokemonTcgImageImportSchema, pokemonTcgSearchQuerySchema,
   newsListQuerySchema, newsWriteSchema, newsPatchSchema, newsSettingsWriteSchema,
 } from './admin-cms-schemas.js';
-import { downloadPokemonTcgImage, getCard, listRarities, listSets, searchCards } from '../../pokemon-tcg/index.js';
+import { downloadPokemonTcgImage, getCard, getCardPriceHistory, listRarities, listSets, searchCards } from '../../pokemon-tcg/index.js';
 
 const noContent = (response: import('express').Response) => response.status(204).send();
 
@@ -52,6 +52,10 @@ export function createAdminCmsRouter({ application, upload, requireAdmin, actorF
   router.get('/pokemon-tcg/cards/:id', async (req, res) => {
     const params = pokemonTcgCardParamsSchema.parse(req.params);
     return res.json({ data: { card: await getCard(params.id) }, meta: {} });
+  });
+  router.get('/pokemon-tcg/cards/:id/prices/history', async (req, res) => {
+    const params = pokemonTcgCardParamsSchema.parse(req.params);
+    return res.json({ data: await getCardPriceHistory(params.id) });
   });
 
   router.get('/products', async (req, res) => res.json(await application.products.list(productListQuerySchema.parse(req.query))));

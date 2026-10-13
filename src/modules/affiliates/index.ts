@@ -9,7 +9,7 @@ import { badRequest, conflict, forbidden, notFound } from '../../shared/errors.j
 import { logger } from '../../infrastructure/logger.js';
 import { discardUnattachedFile, saveImage } from '../media/index.js';
 import { BASE_CURRENCY } from '../../shared/currency.js';
-import { downloadPokemonTcgImage, getCard, listRarities, listSets, searchCards } from '../pokemon-tcg/index.js';
+import { downloadPokemonTcgImage, getCard, getCardPriceHistory, listRarities, listSets, searchCards } from '../pokemon-tcg/index.js';
 import { pokemonTcgSearchQuerySchema } from '../pokemon-tcg/schemas.js';
 import { affiliateBalance, requestSellerCancellation, refundSellerOrder, resolveAffiliateIssue, resolveCancellation, sellerOrderAllowedActions, transitionSellerOrder } from './affiliate-marketplace-service.js';
 import { createAdminNotifications, createAffiliateListingNotification, createAffiliatePayoutNotification, createBuyerSellerOrderStatusNotification, createSellerOrderAdminNotifications, createSellerOrderStatusNotification, publishNotifications } from '../notifications/index.js';
@@ -400,6 +400,11 @@ export function createAffiliateRouter(prisma: PrismaClient, upload: { array(fiel
     activeAffiliateOrThrow(req);
     const params = pokemonTcgCardParamsSchema.parse(req.params);
     return res.json({ data: { card: await getCard(params.id) }, meta: {} });
+  });
+  router.get('/pokemon-tcg/cards/:id/prices/history', async (req, res) => {
+    activeAffiliateOrThrow(req);
+    const params = pokemonTcgCardParamsSchema.parse(req.params);
+    return res.json({ data: await getCardPriceHistory(params.id) });
   });
 
   router.get('/logistics', async (req, res) => {

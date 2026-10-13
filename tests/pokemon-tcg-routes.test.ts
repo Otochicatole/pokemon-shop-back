@@ -5,8 +5,9 @@ import { ZodError } from 'zod';
 import { createAdminCmsRouter } from '../src/modules/backoffice/http/admin-cms-router.js';
 import { createAffiliateRouter } from '../src/modules/affiliates/index.js';
 import { adminPokemonTcgCardSchema, adminPokemonTcgCardSearchResultSchema, adminPokemonTcgCardSummarySchema } from '../src/modules/backoffice/http/admin-cms-response-schemas.js';
+import { pokemonTcgPriceHistoryEnvelopeSchema } from '../src/modules/pokemon-tcg/schemas.js';
 
-const provider = vi.hoisted(() => ({ getCard: vi.fn(), searchCards: vi.fn(), listRarities: vi.fn(), listSets: vi.fn(), downloadPokemonTcgImage: vi.fn() }));
+const provider = vi.hoisted(() => ({ getCard: vi.fn(), getCardPriceHistory: vi.fn(), searchCards: vi.fn(), listRarities: vi.fn(), listSets: vi.fn(), downloadPokemonTcgImage: vi.fn() }));
 vi.mock('../src/modules/pokemon-tcg/index.js', () => provider);
 vi.mock('../src/config/env.js', () => ({ env: {} }));
 vi.mock('../src/infrastructure/logger.js', () => ({ logger: {} }));
@@ -28,6 +29,7 @@ const card = {
   prices: [{ source: 'TCGplayer', currency: 'USD', variant: 'normal', amountMinor: '153', lowAmountMinor: '120', highAmountMinor: null, updatedAt: '2026-10-12T00:00:00Z' }],
 };
 const summary = adminPokemonTcgCardSummarySchema.parse(card);
+const priceHistory = { cardId: '1', prices: [{ sourceId: 'tcgplayer', source: 'TCGPlayer', currency: 'USD', variant: 'normal', amountMinor: '153', recordedAt: '2026-10-12', observedAt: null }] };
 const saveImage = vi.fn();
 const discardImage = vi.fn();
 const addImages = vi.fn();
@@ -54,6 +56,7 @@ function appFor(role: 'admin' | 'affiliate') {
 beforeEach(() => {
   vi.clearAllMocks();
   provider.getCard.mockResolvedValue(card);
+  provider.getCardPriceHistory.mockResolvedValue(priceHistory);
   provider.searchCards.mockResolvedValue({ data: [summary], meta: { page: 1, limit: 20, total: 1, totalPages: 1 } });
   provider.listRarities.mockResolvedValue(['Common']);
   provider.listSets.mockResolvedValue([{ id: 'BASE', name: 'Base Set' }]);
@@ -64,10 +67,11 @@ beforeEach(() => {
 describe.each(['admin', 'affiliate'] as const)('%s Pokémon TCG routes', (role) => {
   it('runs authentication before invoking the provider', async () => {
     const app = appFor(role);
-    for (const endpoint of ['/pokemon-tcg/cards?q=Bulba', '/pokemon-tcg/cards/1', '/pokemon-tcg/sets', '/pokemon-tcg/rarities']) {
+    for (const endpoint of ['/pokemon-tcg/cards?q=Bulba', '/pokemon-tcg/cards/1', '/pokemon-tcg/cards/1/prices/history', '/pokemon-tcg/sets', '/pokemon-tcg/rarities']) {
       expect((await request(app).get(endpoint)).status).toBe(401);
     }
     expect(provider.getCard).not.toHaveBeenCalled();
+    expect(provider.getCardPriceHistory).not.toHaveBeenCalled();
     expect(provider.searchCards).not.toHaveBeenCalled();
     expect(provider.listSets).not.toHaveBeenCalled();
     expect(provider.listRarities).not.toHaveBeenCalled();
@@ -79,6 +83,34 @@ describe.each(['admin', 'affiliate'] as const)('%s Pokémon TCG routes', (role) 
     expect(response.body).toEqual({ data: { card }, meta: {} });
     expect(adminPokemonTcgCardSchema.parse(response.body.data.card)).toEqual(card);
     expect(provider.getCard).toHaveBeenCalledWith('1');
+  });
+
+  it('loads history on its own route without a detail or search request', async () => {
+    const response = await request(appFor(role)).get('/pokemon-tcg/cards/1/prices/history').set('x-test-auth', 'ACTIVE');
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ data: priceHistory });
+    expect(pokemonTcgPriceHistoryEnvelopeSchema.parse(response.body)).toEqual(response.body);
+    expect(provider.getCardPriceHistory).toHaveBeenCalledWith('1');
+    expect(provider.getCard).not.toHaveBeenCalled();
+    expect(provider.searchCards).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed history IDs before invoking the provider', async () => {
+    for (const id of ['0', '01', '-1', '1.2', '1%2F2', 'a', '111111111111111111111']) {
+      expect((await request(appFor(role)).get(`/pokemon-tcg/cards/${id}/prices/history`).set('x-test-auth', 'ACTIVE')).status).toBe(400);
+    }
+    expect(provider.getCardPriceHistory).not.toHaveBeenCalled();
+  });
+
+  it('preserves empty history as a successful empty result and provider failure as an error', async () => {
+    provider.getCardPriceHistory.mockResolvedValueOnce({ cardId: '1', prices: [] });
+    const empty = await request(appFor(role)).get('/pokemon-tcg/cards/1/prices/history').set('x-test-auth', 'ACTIVE');
+    expect(empty.status).toBe(200);
+    expect(empty.body).toEqual({ data: { cardId: '1', prices: [] } });
+    provider.getCardPriceHistory.mockRejectedValueOnce({ status: 502, code: 'POKEMON_TCG_UNAVAILABLE' });
+    const failed = await request(appFor(role)).get('/pokemon-tcg/cards/1/prices/history').set('x-test-auth', 'ACTIVE');
+    expect(failed.status).toBe(502);
+    expect(failed.body.code).toBe('POKEMON_TCG_UNAVAILABLE');
   });
 
   it('rejects legacy and malformed IDs before contacting the provider', async () => {
@@ -140,6 +172,8 @@ it('prevents suspended affiliates from invoking the provider', async () => {
   const result = await request(appFor('affiliate')).get('/pokemon-tcg/cards/1').set('x-test-auth', 'SUSPENDED');
   expect(result.status).toBe(403);
   expect(provider.getCard).not.toHaveBeenCalled();
+  expect((await request(appFor('affiliate')).get('/pokemon-tcg/cards/1/prices/history').set('x-test-auth', 'SUSPENDED')).status).toBe(403);
+  expect(provider.getCardPriceHistory).not.toHaveBeenCalled();
 });
 
 it('discards the downloaded admin image when an optimistic-concurrency update fails', async () => {
