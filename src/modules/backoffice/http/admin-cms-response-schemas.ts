@@ -70,9 +70,18 @@ export const adminProductImagesDataSchema = z.object({ version: z.number().int()
 export const adminProductImageUpdateDataSchema = z.object({ id: z.string().uuid(), altText: z.string().nullable(), version: z.number().int() });
 export const adminProductImageOrderDataSchema = z.object({ imageIds: z.array(z.string().uuid()), version: z.number().int() });
 
-export const adminPokemonTcgCardSummarySchema = z.object({ id: z.string(), name: z.string(), localId: z.string(), setCode: z.string(), imageUrl: z.string().url().nullable(), setName: z.string().optional(), rarity: z.string().optional(), category: z.string().optional(), types: z.array(z.string()).optional(), firstEdition: z.boolean().optional(), holo: z.boolean().optional() });
 export const adminPokemonTcgMarketPriceSchema = z.object({
   amountMinor: z.string().regex(/^\d+$/), currency: z.literal('USD'), source: z.string(), variant: z.string(), updatedAt: z.string(),
+});
+export const adminPokemonTcgPriceSchema = z.object({
+  source: z.string(), currency: z.string().regex(/^[A-Z]{3}$/), variant: z.string(), amountMinor: z.string().regex(/^\d+$/),
+  lowAmountMinor: z.string().regex(/^\d+$/).nullable(), highAmountMinor: z.string().regex(/^\d+$/).nullable(), updatedAt: z.string(),
+});
+export const adminPokemonTcgCardSummarySchema = z.object({
+  id: z.string(), name: z.string(), localId: z.string(), setCode: z.string(), imageUrl: z.string().url().nullable(),
+  setName: z.string(), rarity: z.string(), category: z.string(), types: z.array(z.string()), firstEdition: z.boolean(), holo: z.boolean(),
+  language: z.string(), region: z.enum(['int', 'jp']), special: z.string().nullable(),
+  marketPrice: adminPokemonTcgMarketPriceSchema.nullable(), prices: z.array(adminPokemonTcgPriceSchema),
 });
 export const adminPokemonTcgCardSchema = adminPokemonTcgCardSummarySchema.extend({ setName: z.string(), description: z.string(), rarity: z.string(), category: z.string(), types: z.array(z.string()), firstEdition: z.boolean(), holo: z.boolean(), effect: z.string(), language: z.string(), marketPrice: adminPokemonTcgMarketPriceSchema.nullable() });
 export const adminPokemonTcgCardDataSchema = z.object({ card: adminPokemonTcgCardSchema });

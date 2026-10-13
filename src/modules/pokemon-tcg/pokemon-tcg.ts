@@ -14,6 +14,16 @@ export type PokemonTcgMarketPrice = {
   updatedAt: string;
 };
 
+export type PokemonTcgPrice = {
+  source: string;
+  currency: string;
+  variant: string;
+  amountMinor: string;
+  lowAmountMinor: string | null;
+  highAmountMinor: string | null;
+  updatedAt: string;
+};
+
 export type PokemonTcgCardSummary = {
   id: string;
   name: string;
@@ -26,20 +36,24 @@ export type PokemonTcgCardSummary = {
   types: string[];
   firstEdition: boolean;
   holo: boolean;
+  language: string;
+  region: 'int' | 'jp';
+  special: string | null;
+  marketPrice: PokemonTcgMarketPrice | null;
+  prices: PokemonTcgPrice[];
 };
 
 export type PokemonTcgCardDetails = PokemonTcgCardSummary & {
   description: string;
   effect: string;
-  language: string;
-  marketPrice: PokemonTcgMarketPrice | null;
 };
 
 export type PokemonTcgSetOption = { id: string; name: string };
 
 const priceSchema = z.object({
-  source_id: z.string(), source_name: z.string().min(1), currency: z.string(),
-  variant: z.string(), price: z.number().finite().positive(), updated_at: z.string(),
+  source_id: z.string(), source_name: z.string().trim().min(1), currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/),
+  variant: z.string().trim().min(1), price: z.number().finite().positive(), updated_at: z.string(),
+  low_price: z.unknown().optional(), high_price: z.unknown().optional(),
 });
 const cardSchema = z.object({
   id: z.number().int().positive(), name: z.string().min(1), number: z.string(),
@@ -47,6 +61,7 @@ const cardSchema = z.object({
   card_type: z.enum(['pokemon', 'trainer', 'energy']),
   types: z.array(z.string()).default([]),
   rarity: z.string().nullish(),
+  special: z.string().nullish(),
   images: z.object({ lg: z.string().nullish(), original: z.string().nullish() }).nullish(),
   prices: z.array(z.unknown()).optional(),
 });
@@ -110,6 +125,7 @@ function safeImage(value: string | null | undefined): string | null {
 }
 
 function summary(card: ProviderCard): PokemonTcgCardSummary {
+  const prices = cardPrices(card.prices);
   return {
     id: String(card.id), name: card.name, localId: card.number, setCode: card.set_code,
     setName: card.set_name, imageUrl: safeImage(card.images?.lg) ?? safeImage(card.images?.original),
@@ -117,6 +133,10 @@ function summary(card: ProviderCard): PokemonTcgCardSummary {
     rarity: card.rarity ?? '', types: card.types,
     // Edition and finish are not card metadata fields in this API.
     firstEdition: false, holo: false,
+    language: card.region === 'jp' ? 'Japonés' : 'Inglés', region: card.region,
+    special: card.special?.trim() || null,
+    marketPrice: marketPrice(prices),
+    prices: prices.map(({ sourceId: _sourceId, ...price }) => price),
   };
 }
 
@@ -128,33 +148,50 @@ function cents(value: number): string | null {
   return minor > 0n ? minor.toString() : null;
 }
 
-function marketPrice(values: unknown[] = []): PokemonTcgMarketPrice | null {
-  const variants = ['normal', 'holofoil', 'reverse-holofoil'];
-  const candidates = values.flatMap((value) => {
+const currenciesWithCents = new Set(Intl.supportedValuesOf('currency').filter((currency) =>
+  new Intl.NumberFormat('en', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits === 2));
+type ProviderPrice = PokemonTcgPrice & { sourceId: string };
+
+function optionalCents(value: unknown): string | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? cents(value) : null;
+}
+
+function cardPrices(values: unknown[] = []): ProviderPrice[] {
+  return values.flatMap((value) => {
     const parsed = priceSchema.safeParse(value);
     if (!parsed.success) return [];
     const price = parsed.data;
     const variant = price.variant.trim().toLowerCase().replace(/[\s_]+/g, '-');
-    if (price.currency !== 'USD' || !variants.includes(variant)) return [];
+    // The published USD/EUR prices use cents. Do not mislabel an unknown currency
+    // or silently apply that scale to currencies with a different minor unit.
+    if (!currenciesWithCents.has(price.currency)) return [];
     const amountMinor = cents(price.price);
-    const date = price.updated_at.includes('T') ? price.updated_at : `${price.updated_at.replace(' ', 'T')}Z`;
-    const updated = Date.parse(date);
+    const date = price.updated_at.trim().replace(' ', 'T');
+    const updated = Date.parse(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(date) ? date : `${date}Z`);
     if (!amountMinor || !Number.isFinite(updated)) return [];
-    return [{ amountMinor, currency: 'USD' as const, source: price.source_name, variant, updatedAt: new Date(updated).toISOString(), sourceId: price.source_id }];
+    return [{
+      amountMinor, currency: price.currency, source: price.source_name, variant,
+      lowAmountMinor: optionalCents(price.low_price), highAmountMinor: optionalCents(price.high_price),
+      updatedAt: new Date(updated).toISOString(), sourceId: price.source_id,
+    }];
   });
+}
+
+function marketPrice(prices: ProviderPrice[]): PokemonTcgMarketPrice | null {
+  const variants = ['normal', 'holofoil', 'reverse-holofoil'];
+  const candidates = prices.filter((price) => price.currency === 'USD' && variants.includes(price.variant));
   candidates.sort((left, right) =>
     Number(right.sourceId === 'tcgplayer') - Number(left.sourceId === 'tcgplayer') ||
     variants.indexOf(left.variant) - variants.indexOf(right.variant) || right.updatedAt.localeCompare(left.updatedAt));
   const selected = candidates[0];
   if (!selected) return null;
-  const { sourceId: _sourceId, ...price } = selected;
-  return price;
+  return { amountMinor: selected.amountMinor, currency: 'USD', source: selected.source, variant: selected.variant, updatedAt: selected.updatedAt };
 }
 
 export async function searchCards(input: string): Promise<PokemonTcgCardSummary[]> {
   const query = input.trim();
   if (query.length < 2 || query.length > 80) throw badRequest('POKEMON_TCG_QUERY_INVALID', 'Ingresá entre 2 y 80 caracteres.');
-  const params = new URLSearchParams({ name: query, lang: 'en', page: '1', limit: '20' });
+  const params = new URLSearchParams({ name: query, lang: 'en', page: '1', limit: '20', include_prices: 'true' });
   const result = await request(`/cards?${params}`, cardListSchema);
   return [...new Map(result.data.map((card) => [card.id, summary(card)])).values()];
 }
@@ -163,7 +200,7 @@ export async function getCard(id: string): Promise<PokemonTcgCardDetails> {
   if (!/^[1-9]\d*$/.test(id)) throw badRequest('POKEMON_TCG_ID_INVALID', 'El identificador de carta no es válido.');
   const params = new URLSearchParams({ lang: 'en', include_prices: 'true' });
   const { data: card } = await request(`/cards/${encodeURIComponent(id)}?${params}`, cardDetailSchema);
-  return { ...summary(card), description: '', effect: '', language: card.region === 'jp' ? 'Japonés' : 'Inglés', marketPrice: marketPrice(card.prices) };
+  return { ...summary(card), description: '', effect: '' };
 }
 
 export async function listSets(): Promise<PokemonTcgSetOption[]> {

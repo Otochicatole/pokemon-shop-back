@@ -83,7 +83,7 @@ describe('Pokémon TCG catalog adapter', () => {
     expect(url.searchParams.get('lang')).toBe('en');
     expect(url.searchParams.get('page')).toBe('1');
     expect(url.searchParams.get('limit')).toBe('20');
-    expect(url.searchParams.has('include_prices')).toBe(false);
+    expect(url.searchParams.get('include_prices')).toBe('true');
     expect(url.hash).toBe('');
     const options = fetchMock.mock.calls[0]?.[1];
     expect(new Headers(options?.headers).get('Authorization')).toBe('Bearer unit-test-api-key');
@@ -93,11 +93,11 @@ describe('Pokémon TCG catalog adapter', () => {
     expect(results).toEqual([{
       id: '19395', name: 'Pikachu', localId: '023', setCode: 'SSP', setName: 'Surging Sparks',
       imageUrl: image, category: 'Pokemon', rarity: 'Double rare', types: ['Lightning'],
-      firstEdition: false, holo: false,
+      firstEdition: false, holo: false, language: 'Inglés', region: 'int', special: null, marketPrice: null, prices: [],
     }]);
   });
 
-  it('loads prices only with the selected card and maps market USD to integer cents', async () => {
+  it('loads selected-card prices and maps market USD to integer cents', async () => {
     fetchMock.mockResolvedValue(success(card({ prices: [price()] })));
     const api = await adapter();
     const detail = await api.getCard('19395');
@@ -111,6 +111,56 @@ describe('Pokémon TCG catalog adapter', () => {
       language: 'Inglés',
       marketPrice: { amountMinor: '1234', currency: 'USD', source: 'TCGplayer', variant: 'normal', updatedAt: '2026-10-12T12:00:00.000Z' },
     });
+  });
+
+  it('includes complete metadata and every valid market quote in one search request', async () => {
+    const usdPrice = price({ price: 1147.27, low_price: 699.97, high_price: 1999.99, variant: 'holofoil' });
+    const eurPrice = price({ source_id: 'cardmarket', source_name: 'Cardmarket', currency: 'EUR', price: 63.23, variant: 'holo', updated_at: '2026-10-11 00:44:21' });
+    fetchMock.mockResolvedValue(page([
+      card({ special: 'ucex', prices: [eurPrice, usdPrice] }),
+      card({ id: 19396, region: 'jp', special: 'Supporter', prices: [price({ variant: 'psa-10', price: 999 })] }),
+    ]));
+    const api = await adapter();
+    const results = await api.searchCards('Rayquaza');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestedUrl().searchParams.get('include_prices')).toBe('true');
+    expect(results[0]).toMatchObject({
+      language: 'Inglés', region: 'int', special: 'ucex',
+      marketPrice: { currency: 'USD', amountMinor: '114727', variant: 'holofoil' },
+      prices: [
+        { source: 'Cardmarket', currency: 'EUR', variant: 'holo', amountMinor: '6323', lowAmountMinor: null, highAmountMinor: null, updatedAt: '2026-10-11T00:44:21.000Z' },
+        { source: 'TCGplayer', currency: 'USD', variant: 'holofoil', amountMinor: '114727', lowAmountMinor: '69997', highAmountMinor: '199999', updatedAt: '2026-10-12T12:00:00.000Z' },
+      ],
+    });
+    expect(results[0]?.prices.every((value) => !('sourceId' in value))).toBe(true);
+    expect(results[1]).toMatchObject({ language: 'Japonés', region: 'jp', special: 'Supporter', marketPrice: null, prices: [{ variant: 'psa-10', amountMinor: '99900' }] });
+  });
+
+  it('uses the same price and metadata mapping for results and the selected card', async () => {
+    const providerCard = card({ special: 'ex', prices: [price({ price: 1.005, low_price: 1.004, high_price: 1.015, updated_at: '2026-10-12T09:00:00-03:00' })] });
+    fetchMock.mockResolvedValueOnce(page([providerCard])).mockResolvedValueOnce(success(providerCard));
+    const api = await adapter();
+    const [result] = await api.searchCards('Pikachu');
+    const detail = await api.getCard('19395');
+    expect(detail).toEqual({ ...result, description: '', effect: '' });
+    expect(detail.prices).toEqual([{
+      source: 'TCGplayer', currency: 'USD', variant: 'normal', amountMinor: '101', lowAmountMinor: '100', highAmountMinor: '102', updatedAt: '2026-10-12T12:00:00.000Z',
+    }]);
+  });
+
+  it('omits malformed quotes and keeps a valid price when its optional range is unusable', async () => {
+    fetchMock.mockResolvedValue(page([card({ prices: [
+      price({ price: 0 }), price({ price: -1 }), price({ price: '12.34' }),
+      price({ updated_at: 'not-a-date' }), price({ currency: 'ZZZ' }), price({ currency: 'JPY' }), price({ currency: 'DOLLARS' }),
+      price({ source_name: ' ' }), price({ variant: ' ' }),
+      price({ currency: ' eur ', variant: ' Reverse_Holofoil ', low_price: -1, high_price: '40', updated_at: '2026-10-12T12:00:00' }),
+    ] })]));
+    const api = await adapter();
+    const [result] = await api.searchCards('Pikachu');
+    expect(result?.marketPrice).toBeNull();
+    expect(result?.prices).toEqual([{
+      source: 'TCGplayer', currency: 'EUR', variant: 'reverse-holofoil', amountMinor: '1234', lowAmountMinor: null, highAmountMinor: null, updatedAt: '2026-10-12T12:00:00.000Z',
+    }]);
   });
 
   it('preserves the provider rarity, elemental types and identical set code/name in search and detail', async () => {

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 import { createAdminCmsRouter } from '../src/modules/backoffice/http/admin-cms-router.js';
 import { createAffiliateRouter } from '../src/modules/affiliates/index.js';
-import { adminPokemonTcgCardSchema } from '../src/modules/backoffice/http/admin-cms-response-schemas.js';
+import { adminPokemonTcgCardSchema, adminPokemonTcgCardSummarySchema } from '../src/modules/backoffice/http/admin-cms-response-schemas.js';
 
 const provider = vi.hoisted(() => ({ getCard: vi.fn(), searchCards: vi.fn(), listRarities: vi.fn(), listSets: vi.fn(), downloadPokemonTcgImage: vi.fn() }));
 vi.mock('../src/modules/pokemon-tcg/index.js', () => provider);
@@ -23,9 +23,11 @@ const pass: RequestHandler = (_req, _res, next) => next();
 const card = {
   id: '1', name: 'Bulbasaur', localId: '1', setCode: 'BASE', imageUrl: null,
   setName: 'Base Set', description: '', rarity: 'Common', category: 'Pokemon', types: ['Grass'],
-  firstEdition: false, holo: false, effect: '', language: 'English',
+  firstEdition: false, holo: false, effect: '', language: 'Inglés', region: 'int', special: null,
   marketPrice: { amountMinor: '153', currency: 'USD', source: 'TCGplayer', variant: 'Normal', updatedAt: '2026-10-12T00:00:00Z' },
+  prices: [{ source: 'TCGplayer', currency: 'USD', variant: 'normal', amountMinor: '153', lowAmountMinor: '120', highAmountMinor: null, updatedAt: '2026-10-12T00:00:00Z' }],
 };
+const summary = adminPokemonTcgCardSummarySchema.parse(card);
 const saveImage = vi.fn();
 const discardImage = vi.fn();
 const addImages = vi.fn();
@@ -52,7 +54,7 @@ function appFor(role: 'admin' | 'affiliate') {
 beforeEach(() => {
   vi.clearAllMocks();
   provider.getCard.mockResolvedValue(card);
-  provider.searchCards.mockResolvedValue([{ id: '1', name: 'Bulbasaur' }]);
+  provider.searchCards.mockResolvedValue([summary]);
   provider.listRarities.mockResolvedValue(['Common']);
   provider.listSets.mockResolvedValue([{ id: 'BASE', name: 'Base Set' }]);
   saveImage.mockResolvedValue({ id: 'stored-image' });
@@ -90,7 +92,8 @@ describe.each(['admin', 'affiliate'] as const)('%s Pokémon TCG routes', (role) 
   it('searches and lists provider options using the existing envelopes', async () => {
     const app = appFor(role);
     const result = await request(app).get('/pokemon-tcg/cards?q=Bulba').set('x-test-auth', 'ACTIVE');
-    expect(result.body).toEqual({ data: [{ id: '1', name: 'Bulbasaur' }], meta: {} });
+    expect(result.body).toEqual({ data: [summary], meta: {} });
+    expect(adminPokemonTcgCardSummarySchema.parse(result.body.data[0])).toEqual(summary);
     expect(provider.searchCards).toHaveBeenCalledWith('Bulba');
     expect((await request(app).get('/pokemon-tcg/sets').set('x-test-auth', 'ACTIVE')).body.data).toEqual([{ id: 'BASE', name: 'Base Set' }]);
     expect((await request(app).get('/pokemon-tcg/rarities').set('x-test-auth', 'ACTIVE')).body.data).toEqual(['Common']);
