@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 import { createAdminCmsRouter } from '../src/modules/backoffice/http/admin-cms-router.js';
 import { createAffiliateRouter } from '../src/modules/affiliates/index.js';
-import { adminPokemonTcgCardSchema, adminPokemonTcgCardSummarySchema } from '../src/modules/backoffice/http/admin-cms-response-schemas.js';
+import { adminPokemonTcgCardSchema, adminPokemonTcgCardSearchResultSchema, adminPokemonTcgCardSummarySchema } from '../src/modules/backoffice/http/admin-cms-response-schemas.js';
 
 const provider = vi.hoisted(() => ({ getCard: vi.fn(), searchCards: vi.fn(), listRarities: vi.fn(), listSets: vi.fn(), downloadPokemonTcgImage: vi.fn() }));
 vi.mock('../src/modules/pokemon-tcg/index.js', () => provider);
@@ -54,7 +54,7 @@ function appFor(role: 'admin' | 'affiliate') {
 beforeEach(() => {
   vi.clearAllMocks();
   provider.getCard.mockResolvedValue(card);
-  provider.searchCards.mockResolvedValue([summary]);
+  provider.searchCards.mockResolvedValue({ data: [summary], meta: { page: 1, limit: 20, total: 1, totalPages: 1 } });
   provider.listRarities.mockResolvedValue(['Common']);
   provider.listSets.mockResolvedValue([{ id: 'BASE', name: 'Base Set' }]);
   saveImage.mockResolvedValue({ id: 'stored-image' });
@@ -89,14 +89,45 @@ describe.each(['admin', 'affiliate'] as const)('%s Pokémon TCG routes', (role) 
     expect(provider.getCard).not.toHaveBeenCalled();
   });
 
-  it('searches and lists provider options using the existing envelopes', async () => {
+  it('defaults to the first page and preserves provider pagination in the envelope', async () => {
     const app = appFor(role);
     const result = await request(app).get('/pokemon-tcg/cards?q=Bulba').set('x-test-auth', 'ACTIVE');
-    expect(result.body).toEqual({ data: [summary], meta: {} });
+    expect(result.body).toEqual({ data: [summary], meta: { page: 1, limit: 20, total: 1, totalPages: 1 } });
+    expect(adminPokemonTcgCardSearchResultSchema.parse(result.body)).toEqual(result.body);
     expect(adminPokemonTcgCardSummarySchema.parse(result.body.data[0])).toEqual(summary);
-    expect(provider.searchCards).toHaveBeenCalledWith('Bulba');
+    expect(provider.searchCards).toHaveBeenCalledWith('Bulba', 1);
     expect((await request(app).get('/pokemon-tcg/sets').set('x-test-auth', 'ACTIVE')).body.data).toEqual([{ id: 'BASE', name: 'Base Set' }]);
     expect((await request(app).get('/pokemon-tcg/rarities').set('x-test-auth', 'ACTIVE')).body.data).toEqual(['Common']);
+  });
+
+  it('forwards the selected page with the trimmed search and returns the final partial page', async () => {
+    const resultPage = { data: [summary], meta: { page: 4, limit: 20, total: 61, totalPages: 4 } };
+    provider.searchCards.mockResolvedValueOnce(resultPage);
+    const response = await request(appFor(role)).get('/pokemon-tcg/cards').query({ q: ' Rayquaza ', page: 4 }).set('x-test-auth', 'ACTIVE');
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(resultPage);
+    expect(provider.searchCards).toHaveBeenCalledWith('Rayquaza', 4);
+  });
+
+  it.each(['0', '-1', '1.5', 'abc', '', 'Infinity', '1e2', '9007199254740992'])('rejects invalid page %j before contacting the provider', async (page) => {
+    const response = await request(appFor(role)).get('/pokemon-tcg/cards').query({ q: 'Bulba', page }).set('x-test-auth', 'ACTIVE');
+    expect(response.status).toBe(400);
+    expect(provider.searchCards).not.toHaveBeenCalled();
+  });
+
+  it('rejects repeated page parameters instead of silently selecting one', async () => {
+    const response = await request(appFor(role)).get('/pokemon-tcg/cards?q=Bulba&page=1&page=2').set('x-test-auth', 'ACTIVE');
+    expect(response.status).toBe(400);
+    expect(provider.searchCards).not.toHaveBeenCalled();
+  });
+
+  it('retains an empty result without inventing card or page totals', async () => {
+    const resultPage = { data: [], meta: { page: 1, limit: 20, total: 0, totalPages: 0 } };
+    provider.searchCards.mockResolvedValueOnce(resultPage);
+    const response = await request(appFor(role)).get('/pokemon-tcg/cards?q=Missing').set('x-test-auth', 'ACTIVE');
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(resultPage);
+    expect(adminPokemonTcgCardSearchResultSchema.parse(response.body)).toEqual(resultPage);
   });
 
   it('removes the retired provider endpoints', async () => {

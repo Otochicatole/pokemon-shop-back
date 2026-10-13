@@ -10,6 +10,7 @@ import { logger } from '../../infrastructure/logger.js';
 import { discardUnattachedFile, saveImage } from '../media/index.js';
 import { BASE_CURRENCY } from '../../shared/currency.js';
 import { downloadPokemonTcgImage, getCard, listRarities, listSets, searchCards } from '../pokemon-tcg/index.js';
+import { pokemonTcgSearchQuerySchema } from '../pokemon-tcg/schemas.js';
 import { affiliateBalance, requestSellerCancellation, refundSellerOrder, resolveAffiliateIssue, resolveCancellation, sellerOrderAllowedActions, transitionSellerOrder } from './affiliate-marketplace-service.js';
 import { createAdminNotifications, createAffiliateListingNotification, createAffiliatePayoutNotification, createBuyerSellerOrderStatusNotification, createSellerOrderAdminNotifications, createSellerOrderStatusNotification, publishNotifications } from '../notifications/index.js';
 import type { SupportRealtimeHub } from '../support/support-realtime.js';
@@ -46,7 +47,6 @@ const updateProductFields = baseProductFields.partial().extend({
   if (value.stockMode === 'UNIQUE' && value.stock !== undefined && value.stock > 1) context.addIssue({ code: 'custom', path: ['stock'], message: 'Unique products can only have one unit' });
 });
 const imageOrderSchema = versionSchema.extend({ imageIds: z.array(z.string().uuid()).max(8) });
-const pokemonTcgSearchQuerySchema = z.object({ q: z.string().trim().min(2).max(80) });
 const pokemonTcgCardParamsSchema = z.object({ id: z.string().trim().min(1).max(20).regex(/^[1-9]\d*$/) });
 const pokemonTcgImageImportSchema = versionSchema.extend({ imageUrl: z.string().url().max(500) });
 const listingReviewSchema = versionSchema.extend({ decision: z.enum(['APPROVED', 'CHANGES_REQUESTED', 'REJECTED']), note: z.string().trim().max(500).optional() });
@@ -386,7 +386,7 @@ export function createAffiliateRouter(prisma: PrismaClient, upload: { array(fiel
   router.get('/pokemon-tcg/cards', async (req, res) => {
     activeAffiliateOrThrow(req);
     const query = pokemonTcgSearchQuerySchema.parse(req.query);
-    return res.json({ data: await searchCards(query.q), meta: {} });
+    return res.json(await searchCards(query.q, query.page));
   });
   router.get('/pokemon-tcg/rarities', async (req, res) => {
     activeAffiliateOrThrow(req);

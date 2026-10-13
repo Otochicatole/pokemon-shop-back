@@ -21,7 +21,7 @@ const dateQuery = z.preprocess(emptyToUndefined, z.coerce.date().optional());
 export const idParamsSchema = z.object({ id: z.string().uuid() });
 export const productImageParamsSchema = z.object({ id: z.string().uuid(), imageId: z.string().uuid() });
 export const pokemonTcgCardParamsSchema = z.object({ id: z.string().trim().min(1).max(20).regex(/^[1-9]\d*$/) });
-export const pokemonTcgSearchQuerySchema = z.object({ q: z.string().trim().min(2).max(80) });
+export { pokemonTcgSearchQuerySchema } from '../../pokemon-tcg/schemas.js';
 export const orderParamsSchema = z.object({ number: z.string().trim().min(5).max(40) });
 export const transferReceiptParamsSchema = orderParamsSchema.extend({ receiptId: z.string().uuid() });
 

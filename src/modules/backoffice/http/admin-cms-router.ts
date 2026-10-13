@@ -45,7 +45,7 @@ export function createAdminCmsRouter({ application, upload, requireAdmin, actorF
 
   router.get('/pokemon-tcg/cards', async (req, res) => {
     const query = pokemonTcgSearchQuerySchema.parse(req.query);
-    return res.json({ data: await searchCards(query.q), meta: {} });
+    return res.json(await searchCards(query.q, query.page));
   });
   router.get('/pokemon-tcg/rarities', async (_req, res) => res.json({ data: await listRarities(), meta: {} }));
   router.get('/pokemon-tcg/sets', async (_req, res) => res.json({ data: await listSets(), meta: {} }));

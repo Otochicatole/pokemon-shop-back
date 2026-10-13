@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { BASE_CURRENCY } from '../../../shared/currency.js';
+import { pokemonTcgPaginationSchema } from '../../pokemon-tcg/schemas.js';
 import {
   orderStatuses, paymentMethods, paymentStatuses, pokemonTypes, productConditions,
   productKinds, productStatuses, stockModes,
@@ -85,6 +86,7 @@ export const adminPokemonTcgCardSummarySchema = z.object({
 });
 export const adminPokemonTcgCardSchema = adminPokemonTcgCardSummarySchema.extend({ setName: z.string(), description: z.string(), rarity: z.string(), category: z.string(), types: z.array(z.string()), firstEdition: z.boolean(), holo: z.boolean(), effect: z.string(), language: z.string(), marketPrice: adminPokemonTcgMarketPriceSchema.nullable() });
 export const adminPokemonTcgCardDataSchema = z.object({ card: adminPokemonTcgCardSchema });
+export const adminPokemonTcgCardSearchResultSchema = z.object({ data: z.array(adminPokemonTcgCardSummarySchema), meta: pokemonTcgPaginationSchema });
 
 export const adminInventoryAdjustmentSchema = z.object({
   id: z.string().uuid(), productId: z.string().uuid(), delta: z.number().int(), reason: z.string(),

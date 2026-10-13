@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { env } from '../../config/env.js';
 import { AppError, badRequest, notFound } from '../../shared/errors.js';
+import { pokemonTcgPaginationSchema } from './schemas.js';
 
 const API_URL = 'https://api.pokemon-tcg.dev/v1';
 const CACHE_TTL = 5 * 60_000;
@@ -49,6 +50,8 @@ export type PokemonTcgCardDetails = PokemonTcgCardSummary & {
 };
 
 export type PokemonTcgSetOption = { id: string; name: string };
+export type PokemonTcgPagination = z.infer<typeof pokemonTcgPaginationSchema>;
+export type PokemonTcgCardSearchResult = { data: PokemonTcgCardSummary[]; meta: PokemonTcgPagination };
 
 const priceSchema = z.object({
   source_id: z.string(), source_name: z.string().trim().min(1), currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/),
@@ -66,7 +69,17 @@ const cardSchema = z.object({
   prices: z.array(z.unknown()).optional(),
 });
 type ProviderCard = z.infer<typeof cardSchema>;
-const cardListSchema = z.object({ status: z.literal('success'), data: z.array(cardSchema) });
+const cardListSchema = z.object({
+  status: z.literal('success'),
+  data: z.array(cardSchema).max(20),
+  meta: pokemonTcgPaginationSchema.omit({ totalPages: true }).extend({
+    total_pages: pokemonTcgPaginationSchema.shape.totalPages,
+    limit: z.literal(20),
+  }),
+}).refine(({ data, meta }) =>
+  (meta.total === 0 ? meta.total_pages <= 1 : meta.total_pages === Math.ceil(meta.total / meta.limit)) &&
+  data.length <= meta.total &&
+  (meta.page <= meta.total_pages || data.length === 0));
 const cardDetailSchema = z.object({ status: z.literal('success'), data: cardSchema });
 const setsSchema = z.object({ status: z.literal('success'), data: z.array(z.object({ code: z.string().min(1), name: z.string().min(1) })) });
 
@@ -188,12 +201,16 @@ function marketPrice(prices: ProviderPrice[]): PokemonTcgMarketPrice | null {
   return { amountMinor: selected.amountMinor, currency: 'USD', source: selected.source, variant: selected.variant, updatedAt: selected.updatedAt };
 }
 
-export async function searchCards(input: string): Promise<PokemonTcgCardSummary[]> {
+export async function searchCards(input: string, page = 1): Promise<PokemonTcgCardSearchResult> {
   const query = input.trim();
   if (query.length < 2 || query.length > 80) throw badRequest('POKEMON_TCG_QUERY_INVALID', 'Ingresá entre 2 y 80 caracteres.');
-  const params = new URLSearchParams({ name: query, lang: 'en', page: '1', limit: '20', include_prices: 'true' });
-  const result = await request(`/cards?${params}`, cardListSchema);
-  return [...new Map(result.data.map((card) => [card.id, summary(card)])).values()];
+  if (!Number.isSafeInteger(page) || page < 1) throw badRequest('POKEMON_TCG_PAGE_INVALID', 'La página debe ser un número entero mayor a cero.');
+  const params = new URLSearchParams({ name: query, lang: 'en', page: String(page), limit: '20', include_prices: 'true' });
+  const result = await request(`/cards?${params}`, cardListSchema.refine((value) => value.meta.page === page));
+  return {
+    data: [...new Map(result.data.map((card) => [card.id, summary(card)])).values()],
+    meta: { page: result.meta.page, limit: result.meta.limit, total: result.meta.total, totalPages: result.meta.total_pages },
+  };
 }
 
 export async function getCard(id: string): Promise<PokemonTcgCardDetails> {

@@ -43,8 +43,8 @@ function success(data: unknown, meta?: Record<string, unknown>) {
   });
 }
 
-function page(data: unknown[], pageNumber = 1, totalPages = 1) {
-  return success(data, { page: pageNumber, limit: 20, total: data.length, total_pages: totalPages });
+function page(data: unknown[], pageNumber = 1, total = data.length) {
+  return success(data, { page: pageNumber, limit: 20, total, total_pages: Math.max(1, Math.ceil(total / 20)) });
 }
 
 async function adapter(apiKey: string | null = 'unit-test-api-key') {
@@ -90,7 +90,8 @@ describe('Pokémon TCG catalog adapter', () => {
     expect(options?.redirect).toBe('error');
     expect(options?.signal).toBeInstanceOf(AbortSignal);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(results).toEqual([{
+    expect(results.meta).toEqual({ page: 1, limit: 20, total: 1, totalPages: 1 });
+    expect(results.data).toEqual([{
       id: '19395', name: 'Pikachu', localId: '023', setCode: 'SSP', setName: 'Surging Sparks',
       imageUrl: image, category: 'Pokemon', rarity: 'Double rare', types: ['Lightning'],
       firstEdition: false, holo: false, language: 'Inglés', region: 'int', special: null, marketPrice: null, prices: [],
@@ -121,7 +122,7 @@ describe('Pokémon TCG catalog adapter', () => {
       card({ id: 19396, region: 'jp', special: 'Supporter', prices: [price({ variant: 'psa-10', price: 999 })] }),
     ]));
     const api = await adapter();
-    const results = await api.searchCards('Rayquaza');
+    const { data: results } = await api.searchCards('Rayquaza');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(requestedUrl().searchParams.get('include_prices')).toBe('true');
     expect(results[0]).toMatchObject({
@@ -140,7 +141,7 @@ describe('Pokémon TCG catalog adapter', () => {
     const providerCard = card({ special: 'ex', prices: [price({ price: 1.005, low_price: 1.004, high_price: 1.015, updated_at: '2026-10-12T09:00:00-03:00' })] });
     fetchMock.mockResolvedValueOnce(page([providerCard])).mockResolvedValueOnce(success(providerCard));
     const api = await adapter();
-    const [result] = await api.searchCards('Pikachu');
+    const { data: [result] } = await api.searchCards('Pikachu');
     const detail = await api.getCard('19395');
     expect(detail).toEqual({ ...result, description: '', effect: '' });
     expect(detail.prices).toEqual([{
@@ -156,7 +157,7 @@ describe('Pokémon TCG catalog adapter', () => {
       price({ currency: ' eur ', variant: ' Reverse_Holofoil ', low_price: -1, high_price: '40', updated_at: '2026-10-12T12:00:00' }),
     ] })]));
     const api = await adapter();
-    const [result] = await api.searchCards('Pikachu');
+    const { data: [result] } = await api.searchCards('Pikachu');
     expect(result?.marketPrice).toBeNull();
     expect(result?.prices).toEqual([{
       source: 'TCGplayer', currency: 'EUR', variant: 'reverse-holofoil', amountMinor: '1234', lowAmountMinor: null, highAmountMinor: null, updatedAt: '2026-10-12T12:00:00.000Z',
@@ -170,7 +171,7 @@ describe('Pokémon TCG catalog adapter', () => {
     });
     fetchMock.mockResolvedValueOnce(page([providerCard])).mockResolvedValueOnce(success(providerCard));
     const api = await adapter();
-    const [result] = await api.searchCards('Pikachu ex');
+    const { data: [result] } = await api.searchCards('Pikachu ex');
     const detail = await api.getCard('248');
     const metadata = {
       id: '248', name: 'Pikachu ex', setCode: '30C', setName: '30C',
@@ -195,7 +196,7 @@ describe('Pokémon TCG catalog adapter', () => {
     const providerCard = card({ ...metadata, card_type: 'trainer' });
     fetchMock.mockResolvedValueOnce(page([providerCard])).mockResolvedValueOnce(success(providerCard));
     const api = await adapter();
-    expect(await api.searchCards('Pikachu')).toEqual([expect.objectContaining({ category: 'Trainer', types: [], rarity: '' })]);
+    expect((await api.searchCards('Pikachu')).data).toEqual([expect.objectContaining({ category: 'Trainer', types: [], rarity: '' })]);
     expect(await api.getCard('19395')).toMatchObject({ category: 'Trainer', types: [], rarity: '', marketPrice: null });
   });
 
@@ -203,7 +204,7 @@ describe('Pokémon TCG catalog adapter', () => {
     const providerCard = card({ card_type: 'energy', types: ['Fire'], rarity: 'None' });
     fetchMock.mockResolvedValueOnce(page([providerCard])).mockResolvedValueOnce(success(providerCard));
     const api = await adapter();
-    expect(await api.searchCards('Energy')).toEqual([expect.objectContaining({ category: 'Energy', types: ['Fire'], rarity: 'None' })]);
+    expect((await api.searchCards('Energy')).data).toEqual([expect.objectContaining({ category: 'Energy', types: ['Fire'], rarity: 'None' })]);
     expect(await api.getCard('19395')).toMatchObject({ category: 'Energy', types: ['Fire'], rarity: 'None' });
   });
 
@@ -252,7 +253,7 @@ describe('Pokémon TCG catalog adapter', () => {
       card({ id: 19397, images: { lg: 'http://img.pokemon-tcg.dev/card.png' } }),
     ]));
     const api = await adapter();
-    expect((await api.searchCards('Pikachu')).map((value) => value.imageUrl)).toEqual([image, null, null]);
+    expect((await api.searchCards('Pikachu')).data.map((value) => value.imageUrl)).toEqual([image, null, null]);
   });
 
   it('shares an in-flight search and caches repeated queries for five minutes', async () => {
@@ -297,6 +298,87 @@ describe('Pokémon TCG catalog adapter', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('requests and caches each page independently without loading other pages', async () => {
+    const firstPage = Array.from({ length: 20 }, (_, index) => card({ id: index + 1 }));
+    const secondPage = Array.from({ length: 20 }, (_, index) => card({ id: index + 21 }));
+    fetchMock.mockResolvedValueOnce(page(firstPage, 1, 61)).mockResolvedValueOnce(page(secondPage, 2, 61));
+    const api = await adapter();
+    const first = await api.searchCards('Rayquaza');
+    const second = await api.searchCards('Rayquaza', 2);
+    expect(first.meta).toEqual({ page: 1, limit: 20, total: 61, totalPages: 4 });
+    expect(second.meta).toEqual({ page: 2, limit: 20, total: 61, totalPages: 4 });
+    expect(first.data[0]?.id).toBe('1');
+    expect(second.data[0]?.id).toBe('21');
+    expect(requestedUrl(1).searchParams.get('page')).toBe('2');
+    expect(requestedUrl(1).searchParams.get('include_prices')).toBe('true');
+    expect(await api.searchCards('Rayquaza', 1)).toEqual(first);
+    expect(await api.searchCards('Rayquaza', 2)).toEqual(second);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('deduplicates concurrent requests only when both search and page match', async () => {
+    const resolveResponses = new Map<string, (response: Response) => void>();
+    fetchMock.mockImplementation((input) => new Promise<Response>((resolve) => {
+      const url = new URL(String(input));
+      resolveResponses.set(url.searchParams.get('page')!, resolve);
+    }));
+    const api = await adapter();
+    const pageOne = api.searchCards('Rayquaza', 1);
+    const pageTwo = api.searchCards('Rayquaza', 2);
+    const duplicatePageTwo = api.searchCards('Rayquaza', 2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    resolveResponses.get('1')!(page([card({ id: 1 })], 1, 21));
+    resolveResponses.get('2')!(page([card({ id: 2 })], 2, 21));
+    expect((await pageOne).data[0]?.id).toBe('1');
+    expect(await pageTwo).toEqual(await duplicatePageTwo);
+    expect((await pageTwo).data[0]?.id).toBe('2');
+  });
+
+  it('returns the final partial page with the provider total instead of the page length', async () => {
+    fetchMock.mockResolvedValue(page([card({ id: 13477 })], 4, 61));
+    const api = await adapter();
+    const result = await api.searchCards('Rayquaza', 4);
+    expect(result.data).toHaveLength(1);
+    expect(result.meta).toEqual({ page: 4, limit: 20, total: 61, totalPages: 4 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([0, 1])('retains an empty provider result with total_pages %i', async (totalPages) => {
+    fetchMock.mockResolvedValue(success([], { page: 1, limit: 20, total: 0, total_pages: totalPages }));
+    const api = await adapter();
+    expect(await api.searchCards('No matching card')).toEqual({ data: [], meta: { page: 1, limit: 20, total: 0, totalPages } });
+  });
+
+  it('retains metadata when a requested page is beyond the last result', async () => {
+    fetchMock.mockResolvedValue(page([], 5, 61));
+    const api = await adapter();
+    expect(await api.searchCards('Rayquaza', 5)).toEqual({ data: [], meta: { page: 5, limit: 20, total: 61, totalPages: 4 } });
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])('rejects invalid page %s before calling the provider', async (pageNumber) => {
+    const api = await adapter();
+    await expect(api.searchCards('Pikachu', pageNumber)).rejects.toMatchObject({ status: 400, code: 'POKEMON_TCG_PAGE_INVALID' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    undefined,
+    { page: 1, limit: 20, total: 1 },
+    { page: 1, limit: 20, total: '1', total_pages: 1 },
+    { page: 1, limit: 20, total: -1, total_pages: 1 },
+    { page: 1, limit: 20, total: 1, total_pages: 0 },
+    { page: 1, limit: 20, total: 1, total_pages: 1.5 },
+    { page: 1, limit: 20, total: Number.MAX_SAFE_INTEGER + 1, total_pages: 1 },
+    { page: 1, limit: 100, total: 1, total_pages: 1 },
+    { page: 2, limit: 20, total: 61, total_pages: 4 },
+  ])('rejects malformed or mismatched pagination without exposing provider data: %j', async (meta) => {
+    fetchMock.mockResolvedValueOnce(success([card()], meta)).mockResolvedValueOnce(page([card()]));
+    const api = await adapter();
+    await expect(api.searchCards('Pikachu')).rejects.toMatchObject({ status: 502, code: 'POKEMON_TCG_UNAVAILABLE' });
+    expect((await api.searchCards('Pikachu')).meta.total).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('provides manual rarity choices without calling a nonexistent upstream endpoint', async () => {
     const api = await adapter();
     const rarities = await api.listRarities();
@@ -334,7 +416,7 @@ describe('Pokémon TCG catalog adapter', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     vi.setSystemTime(new Date('2026-10-12T12:00:31.000Z'));
     fetchMock.mockResolvedValueOnce(page([card()]));
-    expect(await api.searchCards('Pikachu')).toHaveLength(1);
+    expect((await api.searchCards('Pikachu')).data).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -342,7 +424,7 @@ describe('Pokémon TCG catalog adapter', () => {
     fetchMock.mockRejectedValueOnce(new DOMException('Upstream timed out', 'TimeoutError')).mockResolvedValueOnce(page([card()]));
     const api = await adapter();
     await expect(api.searchCards('Pikachu')).rejects.toMatchObject({ status: 502, code: 'POKEMON_TCG_UNAVAILABLE' });
-    expect(await api.searchCards('Pikachu')).toHaveLength(1);
+    expect((await api.searchCards('Pikachu')).data).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
